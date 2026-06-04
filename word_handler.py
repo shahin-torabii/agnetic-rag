@@ -29,10 +29,8 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 def iter_block_items(parent):
 
 
-    if isinstance(parent, DocxDocument):
-        parent_elm = parent.element.body
-    else:
-        parent_elm = parent._tc
+
+    parent_elm = parent.element.body
 
     for child in parent_elm.iterchildren():
 
