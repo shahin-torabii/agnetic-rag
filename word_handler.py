@@ -265,10 +265,11 @@ SECTION_MARKERS = {
 }
 
 
+def _token_count(text: str) -> int:
+    return len(text.split())
+
 
 def iter_block_items(parent):
-
-
 
     parent_elm = parent.element.body
 
@@ -280,17 +281,46 @@ def iter_block_items(parent):
         elif child.tag.endswith("}tbl"):
             yield Table(child, parent)
 
-def extract_element(docx_path):
+
+def extract_headers_footers(doc) -> Tuple[List[str], List[str]]:
+    seen_h, seen_f = set(), set()
+    headers, footers = [], []
+    for section in doc.sections:
+        if section.header and not section.header.is_linked_to_previous:
+            for para in section.header.paragraphs:
+                t = para.text.strip()
+                if t and t not in seen_h:
+                    seen_h.add(t);
+                    headers.append(t)
+        if section.footer and not section.footer.is_linked_to_previous:
+            for para in section.footer.paragraphs:
+                t = para.text.strip()
+                if t and t not in seen_f:
+                    seen_f.add(t);
+                    footers.append(t)
+    return headers, footers
+
+
+def extract_element(docx_path: str) -> Tuple[list, DocMeta]:
 
     doc = docx.Document(docx_path)
-
-    elements = []
-    image_counter = 0
-    image_map = {}
-
     path = Path(docx_path)
-    file_name = path.name
-    elements.append(file_name)
+    doc_id = path.name
+
+    headers, footers = extract_headers_footers(doc)
+
+    try:
+        title = doc.core_properties.title
+    except Exception:
+        title = ""
+
+    doc_meta = DocMeta(doc_id = doc_id, title= title, headers=headers, footers= footers)
+
+    image_counter = 0
+    image_map = Dict[str, str] = {}
+
+    body_elements = []
+    heading_stack = List[str] = []
 
     for rel in doc.part.rels.values():
 
@@ -310,9 +340,28 @@ def extract_element(docx_path):
 
         if isinstance(block, Paragraph):
             text = block.text.strip()
+            style = block.style.name
+            if style in HEADING_STYLES:
+                depth = HEADING_STYLES[style]
+                heading_stack= heading_stack[:depth]
+                if text:
+                    heading_stack.append(text)
 
+            elif style in CAPTION_STYLES:
+                if body_elements and isinstance(body_elements[-1], ImageElement):
+                    body_elements[-1].caption = text
+
+                    continue
+                elif body_elements and isinstance(body_elements[-1], TableElement):
+                    body_elements[-1].table = f"Caption: {text}\n{body_elements[-1].table}"
+                    continue
             if text:
-                elements.append(TextElement(text))
+                text_el = TextElement(
+                    text         = text,
+                    style        = style,
+                    section_path = heading_stack.copy(),
+                )
+                body_elements.append(text_el)
 
             blips = block._element.xpath(".//a:blip")
             for blip in blips:
@@ -320,7 +369,7 @@ def extract_element(docx_path):
                 embed_id = blip.get(qn("r:embed"))
 
                 if embed_id in image_map:
-                    elements.append(ImageElement( image_path = image_map[embed_id]))
+                    body_elements.append(ImageElement( image_path = image_map[embed_id],  section_path = heading_stack.copy(),))
 
 
         elif isinstance(block, Table):
@@ -335,34 +384,33 @@ def extract_element(docx_path):
 
             table = "\n".join(rows)
 
-            elements.append(TableElement(table=table))
+            body_elements.append(TableElement(table=table,  section_path = heading_stack.copy(),))
 
 
-    return elements
+    return body_elements, doc_meta
 
 
 
-def create_block(elements: list):
-    doc_id = elements[0]
+def create_block(body_elements: list, doc_meta:DocMeta) -> list:
+    doc_id = doc_meta.doc_id
     block = []
-    for index, element in enumerate(elements[1:]):
+    for index, element in enumerate(body_elements):
         element.element_id = index + 1
         element.doc_id = doc_id
 
         if isinstance(element, ImageElement) or isinstance(element, TableElement):
-            before = []
-            after = []
-            window_size = 4
+            before ,after = [], []
+            window_size = 3
             j = index - 1
             while j>=0 and len(before)<= window_size:
-                if isinstance(elements[j], TextElement):
-                    before.insert(0, elements[j])
+                if isinstance(body_elements[j], TextElement):
+                    before.insert(0,body_elements[j].text)
                 j-=1
 
             j = index + 1
             while j <len(elements) and len(after) <= window_size:
-                if isinstance(elements[j], TextElement):
-                    after.insert(0, elements[j])
+                if isinstance(body_elements[j], TextElement):
+                    after.insert(0, body_elements[j].text)
                 j += 1
 
             element.context_before = before
@@ -370,6 +418,8 @@ def create_block(elements: list):
         block.append(element)
 
     return block
+
+
 
 
 def build_single_doc(blocks):
