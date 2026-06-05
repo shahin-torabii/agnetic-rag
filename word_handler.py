@@ -419,31 +419,89 @@ def create_block(body_elements: list, doc_meta:DocMeta) -> list:
 
     return block
 
+def build_section_tree(bodyelements: list) -> SectionNode:
+
+    root = SectionNode(heading_text="", depth=0, section_path=[])
+    stack : List[SectionNode] = [root]
+
+    for element in bodyelements:
+        if isinstance(element, TextElement) and element.style in HEADING_STYLES:
+            depth = HEADING_STYLES[element.style]
+
+            new_node = SectionNode(
+                 heading_text=element.text,
+                depth=depth,
+                section_path= element.section_path.copy()
+             )
+
+            new_node.elements.append(element)
+
+            while len(stack) >1 and stack[-1].depth >=depth:
+                stack.pop()
+
+            stack[-1].children.append(new_node)
+            stack.append(new_node)
+
+        else:
+            # Non-heading element → belongs to current section
+            stack[-1].elements.append(element)
+
+    return root
+
+
+def _flatten_section_tree(node: SectionNode) -> List[SectionNode]:
+
+    leaves = []
+
+    direct_non_heading = [
+        e for e in node.elements
+        if not (isinstance(e, TextElement) and e.style in HEADING_STYLES)
+    ]
+
+    if node.children:
+
+        if direct_non_heading:
+            synthetic = SectionNode(
+                heading_text=node.heading_text,
+                depth=node.depth,
+                section_path=node.section_path,
+                elements=direct_non_heading,
+            )
+            leaves.append(synthetic)
+        for child in node.children:
+            leaves.extend(_flatten_section_tree(child))
+    else:
+
+        if node.elements or node.heading_text:
+            leaves.append(node)
+
+    return leaves
 
 
 
-def build_single_doc(blocks):
-    image_lookup = {}
-    table_lookup = {}
-    final_doc = []
 
-    for block in blocks:
-        if isinstance(block, TextElement):
-            final_doc.append(block.text)
-        elif isinstance(block, ImageElement):
-            placeholder = f"Image {block.element_id}"
-            final_doc.append(placeholder)
-            image_lookup[block.element_id] = block.image_path
-        elif isinstance(block, TableElement):
-            placeholder = f"Table {block.element_id}"
-            final_doc.append(placeholder)
-            table_lookup[block.element_id] = block.table
-
-    return "\n".join(final_doc), image_lookup, table_lookup
-
-
-def split_and_chunk():
-    pass
+# def build_single_doc(blocks):
+#     image_lookup = {}
+#     table_lookup = {}
+#     final_doc = []
+#
+#     for block in blocks:
+#         if isinstance(block, TextElement):
+#             final_doc.append(block.text)
+#         elif isinstance(block, ImageElement):
+#             placeholder = f"Image {block.element_id}"
+#             final_doc.append(placeholder)
+#             image_lookup[block.element_id] = block.image_path
+#         elif isinstance(block, TableElement):
+#             placeholder = f"Table {block.element_id}"
+#             final_doc.append(placeholder)
+#             table_lookup[block.element_id] = block.table
+#
+#     return "\n".join(final_doc), image_lookup, table_lookup
+#
+#
+# def split_and_chunk():
+#     pass
 
 
 
