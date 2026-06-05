@@ -319,10 +319,10 @@ def extract_element(docx_path: str) -> Tuple[list, DocMeta]:
     doc_meta = DocMeta(doc_id = doc_id, title= title, headers=headers, footers= footers)
 
     image_counter = 0
-    image_map = Dict[str, str] = {}
+    image_map :Dict[str, str] = {}
 
     body_elements = []
-    heading_stack = List[str] = []
+    heading_stack : List[str] = []
 
     for rel in doc.part.rels.values():
 
@@ -410,7 +410,7 @@ def create_block(body_elements: list, doc_meta:DocMeta) -> list:
                 j-=1
 
             j = index + 1
-            while j <len(elements) and len(after) <= window_size:
+            while j <len(body_elements) and len(after) <= window_size:
                 if isinstance(body_elements[j], TextElement):
                     after.insert(0, body_elements[j].text)
                 j += 1
@@ -498,7 +498,7 @@ def build_single_text(blocks:list) -> str:
                 last_depth = depth
             final_doc.append(block.text)
         else:
-            final_doc.append(block)
+            final_doc.append(block.text)
 
     return "\n\n".join(final_doc)
 
@@ -660,10 +660,52 @@ def split_and_chunk(body_elements: list,
     return chunks, image_to_chunks, table_to_chunks
 
 
-    ###################TEST######################
-path_of_word = r"F:\university\az e riz\گزارش.docx"
-elements = extract_element(path_of_word)
-block = create_block(elements)
-for el in block:
-    print(el)
-    print("\n")
+def process_docx(docx_path: str):
+    """
+    Full pipeline for a single DOCX file.
+
+    Returns:
+        chunks          - List[Chunk] ready for embedding + FAISS
+        doc_meta        - DocMeta with doc_type filled in
+                          → store as doc_meta_store[doc_meta.doc_id]
+        image_to_chunks - Dict[image_eid, List[chunk_index]]
+        table_to_chunks - Dict[table_eid, List[chunk_index]]
+
+    Main pipeline usage:
+        chunks, doc_meta, img_idx, tbl_idx = process_docx("report.docx")
+        doc_meta_store[doc_meta.doc_id] = doc_meta
+        embed_and_index(chunks, index, metadata_store)
+    """
+    body_elements, doc_meta = extract_element(docx_path)
+    body_elements = create_block(body_elements, doc_meta)
+    chunks, image_to_chunks, table_to_chunks = split_and_chunk(body_elements, doc_meta)
+    return chunks, doc_meta, image_to_chunks, table_to_chunks
+
+
+if __name__ == "__main__":
+    path_of_word = r"F:\university\az e riz\گزارش.docx"
+
+    chunks, doc_meta, image_to_chunks, table_to_chunks = process_docx(path_of_word)
+
+    print(f"\n Document  : {doc_meta.doc_id}")
+    print(f"   Doc type  : {doc_meta.doc_type}")
+    print(f"   Title     : {doc_meta.title or '(none)'}")
+    print(f"   Headers   : {doc_meta.headers}")
+    print(f"   Footers   : {doc_meta.footers}")
+    print(f"   Chunks    : {len(chunks)}")
+    print(f"   img→chunk : {image_to_chunks}")
+    print(f"   tbl→chunk : {table_to_chunks}\n")
+
+    for c in chunks:
+        print(
+            f"[{c.chunk_index:03d}] type={c.chunk_type:<14} "
+            f"style={c.style:<20} tokens={c.token_count:<4} "
+            f"elements=[{c.start_element_id}..{c.end_element_id}] "
+            f"path={c.section_path}"
+        )
+        print(f"       preview : {c.text[:120].strip()}")
+        if c.image_refs:
+            print(f"       images  : {c.image_refs}")
+        if c.table_refs:
+            print(f"       tables  : {list(c.table_refs.keys())}")
+        print()
