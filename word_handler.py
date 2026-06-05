@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import Enum
 import docx
 from docx.opc.oxml import qn
 from docx.table import Table
@@ -81,6 +82,165 @@ class Chunk:
     table_refs: Dict[int, str] = field(default_factory=dict)
     token_count: int = 0
 
+
+class DocType(str, Enum):
+    RESUME = "RESUME"
+    EMAIL = "EMAIL"
+    LEGAL = "LEGAL"
+    ACADEMIC = "ACADEMIC"
+    TECHNICAL = "TECHNICAL"
+    REPORT = "REPORT"
+    GENERAL = "GENERAL"
+
+DOC_TYPE_SIGNALS : Dict[DocType, List[str]] ={
+    DocType.RESUME: [
+        "resume", "curriculum vitae", "cv", "work experience",
+        "education", "skills", "objective", "references",
+        "employment history", "professional experience",
+        "سوابق شغلی", "تجربه کاری", "مهارت‌ها", "توانایی‌ها",
+        "تحصیلات", "رزومه", "زندگی‌نامه", "اهداف شغلی",
+    ],
+
+    DocType.EMAIL: [
+        "from:", "to:", "cc:", "subject:", "dear", "regards",
+        "sincerely", "forwarded message", "reply", "attachment",
+        "با احترام", "از طرف", "به:", "موضوع:",
+        "ارادتمند", "پیام فوروارد شده",
+    ],
+
+    DocType.LEGAL: [
+        "whereas", "hereinafter", "party", "agreement", "contract",
+        "clause", "terms and conditions", "liability", "jurisdiction",
+        "witnesseth", "indemnity",
+        "قرارداد", "ماده", "تبصره", "طرفین", "تعهدات",
+        "شرایط و ضوابط", "مسئولیت", "صلاحیت قضایی",
+    ],
+
+    DocType.ACADEMIC: [
+        "abstract", "introduction", "methodology", "results",
+        "conclusion", "references", "literature review", "hypothesis",
+        "discussion", "experiment", "analysis",
+        "چکیده", "مقدمه", "روش‌شناسی", "نتایج",
+        "نتیجه‌گیری", "منابع", "بررسی ادبیات",
+        "فرضیه", "بحث", "تحلیل",
+    ],
+
+    DocType.TECHNICAL: [
+        "architecture", "implementation", "algorithm", "api",
+        "specification", "module", "interface", "configuration",
+        "deployment", "system design", "performance",
+        "fpga", "routing", "hardware", "firmware", "protocol",
+        "database", "backend", "frontend",
+        "پیاده‌سازی", "معماری", "الگوریتم",
+        "پیکربندی", "رابط", "ماژول",
+        "پروتکل", "سیستم", "کارایی",
+    ],
+
+    DocType.REPORT: [
+        "executive summary", "findings", "recommendations",
+        "overview", "background", "scope", "appendix",
+        "methodology", "results", "discussion",
+        "خلاصه اجرایی", "یافته‌ها", "پیشنهادات",
+        "بررسی کلی", "پیش‌زمینه", "دامنه",
+        "ضمیمه", "گزارش", "نتایج",
+    ],
+}
+
+
+DOC_TYPE_PROFILES : Dict[DocType, Dict[str, Tuple[int, int]]]={
+ DocType.RESUME: {
+
+        "Normal":    (150, 20),
+        "Heading 1": (80,  10),
+        "Heading 2": (80,  10),
+    },
+    DocType.EMAIL: {
+        "Normal":    (300, 20),
+    },
+    DocType.LEGAL: {
+
+        "Normal":    (400, 100),
+        "Heading 1": (128, 20),
+        "Heading 2": (128, 20),
+    },
+    DocType.ACADEMIC: {
+        "Normal":    (600, 80),
+        "Heading 1": (128, 20),
+        "Heading 2": (128, 20),
+    },
+    DocType.TECHNICAL: {
+        # Technical: code/specs need precision, smaller chunks
+        "Normal":    (350, 50),
+        "Heading 1": (128, 10),
+        "Heading 2": (128, 10),
+    },
+    DocType.REPORT: {
+        "Normal":    (500, 75),
+        "Heading 1": (128, 20),
+        "Heading 2": (128, 20),
+    },
+    DocType.GENERAL: {
+        "Normal":    (500, 75),
+        "Heading 1": (128, 10),
+        "Heading 2": (128, 10),
+    },
+}
+
+BASE_STYLE_PARAMS: Dict[str, Tuple[int, int]] = {
+    "Title":          (128, 10),
+    "Heading 1":      (128, 10),
+    "Heading 2":      (128, 10),
+    "Heading 3":      (128, 10),
+    "Heading 4":      (128, 10),
+    "Caption":        (100, 10),
+    "Figure Caption": (100, 10),
+    "Table Caption":  (100, 10),
+    "Normal":         (500, 75),
+}
+
+def classify_document(doc_meta: DocMeta, body_elements:list) -> DocType:
+
+    main_concepts = " ".join(filter(None, [ doc_meta.title,
+        *doc_meta.headers,
+        *doc_meta.footers,
+    ])).lower()
+
+    secondary_concepts = " ".join(el.text for el in body_elements[:20] if isinstance(el , TextElement)).lower()
+
+    heading_texts = [
+        el.text.lower() for el in body_elements
+        if isinstance(el, TextElement) and el.style in ("Heading 1", "Heading 2")
+    ]
+    heading_blob = " ".join(heading_texts)
+    scores: Dict[DocType, int] = {dt: 0 for dt in DocType}
+
+    for doctype, keywords in DOC_TYPE_SIGNALS.items():
+        for keyword in keywords:
+            if keyword in main_concepts:
+                scores[doctype] +=2
+
+            if keyword in secondary_concepts:
+                scores[doctype]+=1
+
+            if keyword in heading_blob:
+                scores[doctype] += 2
+
+    category = max(scores, key=lambda dt:scores[dt])
+    max_score = scores[category]
+    return category if max_score > 0 else DocType.GENERAL
+
+
+def pick_chunk_size(doc_type:DocType, chunk_type:str , style:str) -> Tuple[int, int]:
+    if chunk_type == "image_context":
+        return 400, 60
+    elif chunk_type == "table":
+        return None, None
+    else:
+        profile = DOC_TYPE_PROFILES.get(doc_type, {})
+        if style in profile:
+            return profile[style]
+        else:
+            return BASE_STYLE_PARAMS.get(style, (500, 75))
 
 IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
