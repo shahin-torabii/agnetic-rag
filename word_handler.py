@@ -12,6 +12,8 @@ from typing import List, Optional, Tuple , Dict
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import re
 
+from sympy.series.limitseq import dominant
+
 
 @dataclass
 class DocMeta:
@@ -480,33 +482,185 @@ def _flatten_section_tree(node: SectionNode) -> List[SectionNode]:
 
 
 
-def build_single_doc(blocks:list) -> str:
-    image_lookup = {}
-    table_lookup = {}
+def build_single_text(blocks:list) -> str:
+
     final_doc = []
+    last_depth = None
 
     for block in blocks:
-        if isinstance(block, TextElement):
+        if not isinstance(block, TextElement):
+            continue
+        if  block.style in HEADING_STYLES:
+            depth = HEADING_STYLES[block.style]
+            marker = SECTION_MARKERS.get(depth, "[SECTION]")
+            if depth !=last_depth:
+                final_doc.append(marker)
+                last_depth = depth
             final_doc.append(block.text)
-        elif isinstance(block, ImageElement):
-            placeholder = f"Image {block.element_id}"
-            final_doc.append(placeholder)
-            image_lookup[block.element_id] = block.image_path
-        elif isinstance(block, TableElement):
-            placeholder = f"Table {block.element_id}"
-            final_doc.append(placeholder)
-            table_lookup[block.element_id] = block.table
+        else:
+            final_doc.append(block)
 
-    return "\n".join(final_doc), image_lookup, table_lookup
-#
-#
-# def split_and_chunk():
-#     pass
+    return "\n\n".join(final_doc)
 
 
+def split_and_chunk(body_elements: list,
+    doc_meta: DocMeta,
+) -> Tuple[List[Chunk], Dict[int, List[int]], Dict[int, List[int]]]:
+
+    doc_type = classify_document(doc_meta, body_elements)
+    doc_meta.doc_type = doc_type
+    doc_id = doc_meta.doc_id
+
+    section_tree = build_section_tree(body_elements)
+    section_leaves = _flatten_section_tree(section_tree)
+
+    chunks: List[Chunk] = []
+    image_to_chunks: Dict[int, List[int]] = {}
+    table_to_chunks: Dict[int, List[int]] = {}
+    chunk_index = 0
+
+    for section in section_leaves:
+        text_sec: List[TextElement] = []
+        media_list: List[Tuple[int, object]] = []
+
+        for el in section.elements:
+            if isinstance(el, TextElement):
+                text_sec.append(el)
+            else:
+                media_list.append((len(media_list), el))
+
+        if text_sec:
+            start_eid = text_sec[0].element_id
+            end_eid = text_sec[-1].element_id
+            dominant_style = text_sec[0].style
+            dominant_path = section.section_path
+            sec_text = build_single_text(text_sec)
+
+            chunk_size, chunk_overlap = pick_chunk_size(doc_type= doc_type, style=dominant_style, chunk_type="text")
+
+            if _token_count(sec_text) < chunk_size:
+                chunks.append(
+                    Chunk(
+                        text = sec_text,
+                        doc_id=doc_id,
+                        chunk_index = chunk_index,
+                        chunk_type="text",
+                        style=dominant_style,
+                        section_path= dominant_path,
+                        start_element_id= start_eid,
+                        end_element_id=end_eid,
+                        token_count=_token_count(sec_text),
+                    )
+                )
+                chunk_index+=1
+            else:
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=chunk_size * 5,
+                    chunk_overlap=chunk_overlap * 5,
+                    separators=[
+                        "[SECTION]", "[SUBSECTION]", "[SUBSUBSECTION]",
+                        "\n\n", "\n", ". ", " ", ""
+                    ],
+                )
+
+                for chunk_tok in splitter.split_text(sec_text):
+                    chunks.append(Chunk(
+                        text=chunk_tok,
+                        doc_id=doc_id,
+                        chunk_index=chunk_index,
+                        chunk_type="text",
+                        style=dominant_style,
+                        section_path=dominant_path,
+                        start_element_id=start_eid,
+                        end_element_id=end_eid,
+                        token_count=_token_count(chunk_tok),
+                    ))
+                    chunk_index += 1
+
+        if media_list:
+            for _, media in media_list:
+                if isinstance(media, ImageElement):
+                    before_text = " ".join(media.context_before)
+                    after_text = " ".join(media.context_after)
+                    placeholder = f"[IMAGE_{media.element_id}]"
+                    caption_text = f"Caption: {media.caption}" if media.caption else ""
+                    section_prefix = " > ".join(media.section_path)
+
+                    full_text = "\n".join(filter(None, [
+                        f"[{section_prefix}]" if section_prefix else "",
+                        before_text,
+                        placeholder,
+                        caption_text,
+                        after_text,
+                    ])).strip()
+
+                    chunks.append(Chunk(
+                        text=full_text,
+                        doc_id=doc_id,
+                        chunk_index=chunk_index,
+                        chunk_type="image_context",
+                        section_path=media.section_path,
+                        start_element_id=media.element_id,
+                        end_element_id=media.element_id,
+                        image_refs={media.element_id: media.image_path},
+                        token_count=_token_count(full_text),
+                    ))
+                    image_to_chunks.setdefault(media.element_id, []).append(chunk_index)
+                    chunk_index += 1
+
+                elif isinstance(media, TableElement):
+                    rows = media.table.split("\n")
+                    context = " ".join(media.context_before)
+                    section_prefix = " > ".join(media.section_path)
+
+                    header_lines = "\n".join(filter(None, [
+                        f"[{section_prefix}]" if section_prefix else "",
+                        context,
+                        f"[TABLE_{media.element_id}]",
+                    ]))
+
+                    if len(rows) < 15:
+                        full_text = f"{header_lines} \n { media.table}".strip()
+                        chunks.append(Chunk(
+                            text=full_text,
+                            doc_id=doc_id,
+                            chunk_index=chunk_index,
+                            chunk_type="table",
+                            section_path=media.section_path,
+                            start_element_id=media.element_id,
+                            end_element_id=media.element_id,
+                            table_refs={media.element_id: media.table},
+                            token_count=_token_count(full_text),
+                        ))
+                        table_to_chunks.setdefault(media.element_id, []).append(chunk_index)
+                        chunk_index += 1
+                    else:
+                        headers = rows[0]
+                        data_rows = rows[1:]
+                        window, step = 10, 8
+                        for w in range(0, len(data_rows), step):
+                            batch = [headers] + data_rows[w:w+window]
+                            prefix = header_lines if w == 0 else f"[TABLE_{media.element_id} continued]"
+                            full_text = f"{prefix}\n" + "\n".join(batch)
+
+                            chunks.append(Chunk(
+                                text=full_text.strip(),
+                                doc_id=doc_id,
+                                chunk_index=chunk_index,
+                                chunk_type="table",
+                                section_path=media.section_path,
+                                start_element_id=media.element_id,
+                                end_element_id=media.element_id,
+                                table_refs={media.element_id: media.table},
+                                token_count=_token_count(full_text),
+                            ))
+                            table_to_chunks.setdefault(media.element_id, []).append(chunk_index)
+                            chunk_index += 1
+
+    return chunks, image_to_chunks, table_to_chunks
 
 
-###################TEST######################
+    ###################TEST######################
 path_of_word = r"F:\university\az e riz\گزارش.docx"
 elements = extract_element(path_of_word)
 block = create_block(elements)
