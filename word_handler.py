@@ -480,24 +480,24 @@ def _flatten_section_tree(node: SectionNode) -> List[SectionNode]:
 
 
 
-# def build_single_doc(blocks):
-#     image_lookup = {}
-#     table_lookup = {}
-#     final_doc = []
-#
-#     for block in blocks:
-#         if isinstance(block, TextElement):
-#             final_doc.append(block.text)
-#         elif isinstance(block, ImageElement):
-#             placeholder = f"Image {block.element_id}"
-#             final_doc.append(placeholder)
-#             image_lookup[block.element_id] = block.image_path
-#         elif isinstance(block, TableElement):
-#             placeholder = f"Table {block.element_id}"
-#             final_doc.append(placeholder)
-#             table_lookup[block.element_id] = block.table
-#
-#     return "\n".join(final_doc), image_lookup, table_lookup
+def build_single_doc(blocks:list) -> str:
+    image_lookup = {}
+    table_lookup = {}
+    final_doc = []
+
+    for block in blocks:
+        if isinstance(block, TextElement):
+            final_doc.append(block.text)
+        elif isinstance(block, ImageElement):
+            placeholder = f"Image {block.element_id}"
+            final_doc.append(placeholder)
+            image_lookup[block.element_id] = block.image_path
+        elif isinstance(block, TableElement):
+            placeholder = f"Table {block.element_id}"
+            final_doc.append(placeholder)
+            table_lookup[block.element_id] = block.table
+
+    return "\n".join(final_doc), image_lookup, table_lookup
 #
 #
 # def split_and_chunk():
