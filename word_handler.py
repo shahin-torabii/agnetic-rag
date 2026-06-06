@@ -515,8 +515,8 @@ def split_and_chunk(body_elements: list,
     section_leaves = _flatten_section_tree(section_tree)
 
     chunks: List[Chunk] = []
-    image_to_chunks: Dict[int, List[int]] = {}
-    table_to_chunks: Dict[int, List[int]] = {}
+    image_to_chunks: Dict[(str, int), List[Chunk]] = {}
+    table_to_chunks: Dict[(str,int), List[Chunk]] = {}
     chunk_index = 0
 
     for section in section_leaves:
@@ -593,8 +593,7 @@ def split_and_chunk(body_elements: list,
                         caption_text,
                         after_text,
                     ])).strip()
-
-                    chunks.append(Chunk(
+                    chunk = Chunk(
                         text=full_text,
                         doc_id=doc_id,
                         chunk_index=chunk_index,
@@ -604,8 +603,9 @@ def split_and_chunk(body_elements: list,
                         end_element_id=media.element_id,
                         image_refs={media.element_id: media.image_path},
                         token_count=_token_count(full_text),
-                    ))
-                    image_to_chunks.setdefault(media.element_id, []).append(chunk_index)
+                    )
+                    chunks.append(chunk)
+                    image_to_chunks.setdefault((doc_id,media.element_id), []).append(chunk)
                     chunk_index += 1
 
                 elif isinstance(media, TableElement):
@@ -621,7 +621,7 @@ def split_and_chunk(body_elements: list,
 
                     if len(rows) < 15:
                         full_text = f"{header_lines} \n { media.table}".strip()
-                        chunks.append(Chunk(
+                        chunk = Chunk(
                             text=full_text,
                             doc_id=doc_id,
                             chunk_index=chunk_index,
@@ -631,8 +631,9 @@ def split_and_chunk(body_elements: list,
                             end_element_id=media.element_id,
                             table_refs={media.element_id: media.table},
                             token_count=_token_count(full_text),
-                        ))
-                        table_to_chunks.setdefault(media.element_id, []).append(chunk_index)
+                        )
+                        chunks.append(chunk)
+                        table_to_chunks.setdefault((doc_id,media.element_id), []).append(chunk)
                         chunk_index += 1
                     else:
                         headers = rows[0]
@@ -642,8 +643,7 @@ def split_and_chunk(body_elements: list,
                             batch = [headers] + data_rows[w:w+window]
                             prefix = header_lines if w == 0 else f"[TABLE_{media.element_id} continued]"
                             full_text = f"{prefix}\n" + "\n".join(batch)
-
-                            chunks.append(Chunk(
+                            chunk = Chunk(
                                 text=full_text.strip(),
                                 doc_id=doc_id,
                                 chunk_index=chunk_index,
@@ -653,8 +653,9 @@ def split_and_chunk(body_elements: list,
                                 end_element_id=media.element_id,
                                 table_refs={media.element_id: media.table},
                                 token_count=_token_count(full_text),
-                            ))
-                            table_to_chunks.setdefault(media.element_id, []).append(chunk_index)
+                            )
+                            chunks.append(chunk)
+                            table_to_chunks.setdefault((doc_id,media.element_id), []).append(chunk)
                             chunk_index += 1
 
     return chunks, image_to_chunks, table_to_chunks
