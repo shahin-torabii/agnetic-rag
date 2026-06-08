@@ -308,4 +308,188 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
     return slides, pp_meta
 
 
+def slide_section_path(slide: SlideData) -> List[str]:
+    """Build section_path equivalent: [section_name, slide_title] (non-empty only)."""
+    return [p for p in [slide.section_name, slide.title] if p]
 
+
+def pick_size(doc_type: DocType) -> int:
+
+    return {
+        DocType.TECHNICAL: 300,
+        DocType.LEGAL: 300,
+        DocType.ACADEMIC: 400,
+        DocType.REPORT: 350,
+    }.get(doc_type, SLIDE_TOKEN_LIMIT)
+
+
+def chunk(slides: List[SlideData], doc_meta:PPTX_META, doctype:DocType)\
+        ->Tuple[List[Chunk], Dict[tuple, List[Chunk]], Dict[tuple, List[Chunk]]]:
+    chunks: List[Chunk] = []
+    image_to_chunks: Dict[tuple, List[Chunk]] = {}
+    table_to_chunks: Dict[tuple, List[Chunk]] = {}
+    chunk_index = 0
+    doc_id = doc_meta.doc_id
+    size_limit = pick_size(doctype)
+
+    for slide in slides:
+        section_path = slide_section_path(slide)
+        slide_prefix = f"[SLIDE {slide.slide_number}]"
+        if slide.title:
+            slide_prefix += f" {slide.title}"
+        if slide.section_name:
+            slide_prefix += f" | {slide.section_name}"
+
+        body_elements = [e for e in slide.elements if e.type == "body"]
+        notes_elements = [e for e in slide.elements if e.type == "notes"]
+        table_elements = [e for e in slide.elements if e.type == "table"]
+        image_elements = [e for e in slide.elements if e.type == "image"]
+
+        body_text= "\n".join(l.text for l in body_elements)
+        full_text = f"{section_path}|\n {body_text}".strip() if body_text else slide_prefix
+
+        if _token_count(full_text) <= size_limit:
+            chunk = Chunk(
+                text             = full_text,
+                doc_id           = doc_id,
+                chunk_index      = chunk_index,
+                chunk_type       = "text",
+                style            = "slide_body",
+                section_path     = section_path,
+                start_element_id = body_elements[0].element_id if body_elements else 0,
+                end_element_id   = body_elements[-1].element_id if body_elements else 0,
+                token_count      = _token_count(full_text),
+            )
+            chunks.append(chunk)
+            chunk_index += 1
+        else:
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=size_limit * 5,
+                chunk_overlap=50 * 5,
+                separators=["\n", ". ", " ", ""],
+            )
+
+            box_texts = [f"{slide_prefix}\n{body_elements[0].text}"] + \
+                        [e.text for e in body_elements[1:]]
+            joined = "\n\n".join(box_texts)
+            sub_chunks = splitter.split_text(joined)
+
+            for sp in sub_chunks:
+                chunk = Chunk(
+                    text=sp,
+                    doc_id=doc_id,
+                    chunk_index=chunk_index,
+                    chunk_type="text",
+                    style="slide_body",
+                    section_path=section_path,
+                    start_element_id=body_elements[0].element_id,
+                    end_element_id=body_elements[-1].element_id,
+                    token_count=_token_count(sp),
+                )
+                chunks.append(chunk)
+                chunk_index += 1
+
+        for el in notes_elements:
+            notes_text = f"{slide_prefix} [NOTES]\n{el.text}"
+            chunks.append(Chunk(
+                text=notes_text,
+                doc_id=doc_id,
+                chunk_index=chunk_index,
+                chunk_type="notes",
+                style="slide_notes",
+                section_path=section_path,
+                start_element_id=el.element_id,
+                end_element_id=el.element_id,
+                token_count=_token_count(notes_text),
+            ))
+            chunk_index += 1
+
+        for el in table_elements:
+            rows = el.text.split("\n")
+            context = slide_prefix
+
+            if len(rows) <= 15:
+                full_text = f"{context}\n[TABLE_{el.element_id}]\n{el.text}".strip()
+                c = Chunk(
+                    text=full_text,
+                    doc_id=doc_id,
+                    chunk_index=chunk_index,
+                    chunk_type="table",
+                    style="slide_table",
+                    section_path=section_path,
+                    start_element_id=el.element_id,
+                    end_element_id=el.element_id,
+                    table_refs={el.element_id: el.text},
+                    token_count=_token_count(full_text),
+                )
+                chunks.append(c)
+                table_to_chunks.setdefault(
+                    (doc_id, el.element_id), []
+                ).append(c)
+                chunk_index += 1
+
+            else:
+                header_row = rows[0]
+                data_rows = rows[1:]
+                window, step = 10, 8
+
+                for w in range(0, len(data_rows), step):
+                    batch = [header_row] + data_rows[w:w + window]
+                    prefix = context if w == 0 else f"[TABLE_{el.element_id} continued]"
+                    full_text = f"{prefix}\n" + "\n".join(batch)
+
+                    c = Chunk(
+                        text=full_text.strip(),
+                        doc_id=doc_id,
+                        chunk_index=chunk_index,
+                        chunk_type="table",
+                        style="slide_table",
+                        section_path=section_path,
+                        start_element_id=el.element_id,
+                        end_element_id=el.element_id,
+                        table_refs={el.element_id: el.text},
+                        token_count=_token_count(full_text),
+                    )
+                    chunks.append(c)
+                    table_to_chunks.setdefault(
+                        (doc_id, el.element_id), []
+                    ).append(c)
+                    chunk_index += 1
+
+        for el in image_elements:
+            # Context = slide title + all body text on this slide
+            context_text ="\n".join(body_elements[:3])
+
+            if len(context_text.split()) > 100:
+                context_text = " ".join(
+                    context_text.split()[:100]
+                )
+
+            caption_text = f"Caption: {el.caption}" if el.caption else ""
+
+            full_text = "\n".join(filter(None, [
+                slide_prefix,
+                f"[IMAGE_{el.element_id}]",
+                caption_text,
+                context_text,
+            ])).strip()
+
+            c = Chunk(
+                text=full_text,
+                doc_id=doc_id,
+                chunk_index=chunk_index,
+                chunk_type="image_context",
+                style="slide_image",
+                section_path=section_path,
+                start_element_id=el.element_id,
+                end_element_id=el.element_id,
+                image_refs={el.element_id: el.image_path},
+                token_count=_token_count(full_text),
+            )
+            chunks.append(c)
+            image_to_chunks.setdefault(
+                (doc_id, el.element_id), []
+            ).append(c)
+            chunk_index += 1
+
+        return chunks, image_to_chunks, table_to_chunks
