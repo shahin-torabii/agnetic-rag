@@ -65,4 +65,5 @@ class SlideData:
     layout_name:str
     elements: List[SlideElement] = field(default_factory=list)
 
+def extract_element(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]
 
