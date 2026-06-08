@@ -27,9 +27,7 @@ SECTION_HEADER_LAYOUTS = {
     "chapter",
 }
 
-SKIP_LAYOUTS = {
-    "title slide",
-}
+SKIP_LAYOUTS = {"blank"}
 
 SLIDE_TOKEN_LIMIT = 300
 
@@ -46,8 +44,8 @@ class SlideElement:
     doc_id: str
     element_id :int
     slide_number:int
-    style:str
     type:str
+    style: str = ""
     caption:str = ""
     text: str = ""
     image_path: str = ""
@@ -60,11 +58,11 @@ class SlideElement:
 class SlideData:
     doc_id:str
     slide_number:int
-    prev_slide: int
-    next_slide: int
     title:str
     section_name:str
     layout_name:str
+    prev_slide: int = 0
+    next_slide: int = 0
     elements: List[SlideElement] = field(default_factory=list)
 
 
@@ -124,13 +122,20 @@ def find_nearest_text(
         if _token_count(el.text) > max_tokens:
             continue
         el_cx, el_cy = shape_center(el.x, el.y, el.width, el.height)
-        distance = np.linalg.norm(img_cx- el_cx, img_cy - el_cy)
+        distance = np.linalg.norm([img_cx - el_cx, img_cy - el_cy])
         if distance < best_dist:
             best_dist = distance
             best_el = el
 
     return best_el
 
+
+def iter_shapes(shapes):
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from iter_shapes(shape.shapes)
+        else:
+            yield shape
 
 def classify_presentation(meta: PPTX_META, slides: List[SlideData]) -> DocType:
 
@@ -186,7 +191,7 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
         layout_names= slide.slide_layout.name.lower().strip()
 
         if any(s in layout_names for s in SECTION_HEADER_LAYOUTS):
-            for shape in slide.shapes:
+            for shape in iter_shapes(slide.shapes):
                 if is_title(shape):
                     section = extract_text(shape).strip()
                     if section:
@@ -197,10 +202,10 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
 
 
 
-        slide_elements = List[SlideElement] = []
+        slide_elements : List[SlideElement] = []
         title:str = ""
         if not skip:
-            for shape in slide.shapes:
+            for shape in iter_shapes(slide.shapes):
                 if is_title(shape):
                     title = extract_text(shape).strip()
                     continue
@@ -226,7 +231,7 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
                     image_bytes = shape.image.blob
                     image_ext = shape.image.ext
 
-                    file_name = f"{doc_id}_slide{slide_number}_image {image_counter}"
+                    file_name = f"{doc_id}_slide{slide_number}_image {image_counter}.{image_ext}"
                     image_path = os.path.join(IMAGE_DIR, file_name)
 
                     with open(image_path, "wb") as f:
@@ -277,11 +282,7 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
 
 
 
-        slide_el = SlideData(title = title,
-                             slide_number=slide_number,
-                             slide_elements = slide_elements,
-                             section_name=current_section,
-                             layout_name=layout_names)
+
 
         body_els = [e for e in slide_elements if e.type == "body"]
         claimed = set()
@@ -298,12 +299,18 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
                 claimed.add(candidate.element_id)
 
 
-        elements = [e for e in elements if e.element_id not in claimed]
-        slides.append(slide)
+        slide_elements = [e for e in slide_elements if e.element_id not in claimed]
+        slide_el = SlideData(title=title,
+                             doc_id=doc_id,
+                             slide_number=slide_number,
+                             elements=slide_elements,
+                             section_name=current_section,
+                             layout_name=layout_names)
+        slides.append(slide_el)
 
     for index,slide in enumerate(slides):
         slide.prev_slide = slides[index - 1].slide_number if index> 0 else 0
-        slide.next_slide = slides[index+1].slide_number  if index < len(slides) else 0
+        slide.next_slide = slides[index+1].slide_number  if index < len(slides) -1  else 0
 
     return slides, pp_meta
 
@@ -457,8 +464,8 @@ def chunk(slides: List[SlideData], doc_meta:PPTX_META, doctype:DocType)\
                     chunk_index += 1
 
         for el in image_elements:
-            # Context = slide title + all body text on this slide
-            context_text ="\n".join(body_elements[:3])
+
+            context_text ="\n".join(body_text[:3])
 
             if len(context_text.split()) > 100:
                 context_text = " ".join(
@@ -492,4 +499,40 @@ def chunk(slides: List[SlideData], doc_meta:PPTX_META, doctype:DocType)\
             ).append(c)
             chunk_index += 1
 
-        return chunks, image_to_chunks, table_to_chunks
+    return chunks, image_to_chunks, table_to_chunks
+
+
+def process_pptx(pptx_path: str):
+
+    slides, meta = extract_slides(pptx_path)
+    doc_type = classify_presentation(meta, slides)
+    meta.doc_type = doc_type.value
+
+    chunks, image_to_chunks, table_to_chunks = chunk(slides, meta, doc_type)
+    return chunks, meta, image_to_chunks, table_to_chunks
+
+
+if __name__ == "__main__":
+    path = r"F:\university\pajoohesh\power\Farham (4).pptx"
+
+    chunks, meta, image_to_chunks, table_to_chunks = process_pptx(path)
+
+    print(f" Presentation : {meta.doc_id}")
+    print(f"   Doc type     : {meta.doc_type}")
+    print(f"   Slides       : {meta.slide_count}")
+    print(f"   Chunks       : {len(chunks)}")
+    print(f"   img→chunk    : { {k: len(v) for k, v in image_to_chunks.items()} }")
+    print(f"   tbl→chunk    : { {k: len(v) for k, v in table_to_chunks.items()} }\n")
+
+    for c in chunks:
+        print(
+            f"[{c.chunk_index:03d}] type={c.chunk_type:<14} "
+            f"tokens={c.token_count:<4} "
+            f"path={c.section_path}"
+        )
+        print(f"       preview : {c.text.strip()}")
+        if c.image_refs:
+            print(f"       images  : {c.image_refs}")
+        if c.table_refs:
+            print(f"       tables  : {list(c.table_refs.keys())}")
+        print()
