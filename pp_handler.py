@@ -6,7 +6,8 @@ from pathlib import Path
 import os
 
 from pptx import Presentation
-from pptx.util import Pt
+from pptx.util import Pt, Emu
+from pptx.enum.shapes import PP_PLACEHOLDER
 from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -68,21 +69,94 @@ class SlideData:
 
 
 def is_title(shape) -> bool:
-    pass
+    if not shape.is_placeholder:
+        return False
+    else:
+        pp_type = shape.placeholder_format.type
+        return pp_type in (
+            PP_PLACEHOLDER.TITLE,
+            PP_PLACEHOLDER.CENTER_TITLE
+        )
 
 def extract_text(shape) -> str:
-    pass
+    lines = []
+    if not shape.has_text_frame:
+        return " "
+
+
+    for para in shape.text_frame.paragraphs:
+        text = para.text.strip()
+        if text:
+            lines.append(text)
+
+    return "\n".join(lines)
+
+
+def shape_center(x: int, y: int, width: int, height: int) -> Tuple[float, float]:
+
+    return (x + width / 2, y + height / 2)
 
 
 def table_to_string(table) ->str:
-    pass
+    rows = []
+
+    for row in table.rows:
+        cells = [cell.text.strip() for cell in row.cells]
+        cells_ = "|".join(cells)
+        rows.append(cells_)
+    table_str = "\n".join(rows)
+    return table_str
 
 def find_nearest_text(
     image_el: "SlideElement",
     body_elements: List["SlideElement"],
     max_tokens:    int = 30,
 ) -> Optional["SlideElement"]:
-    pass
+
+    if not body_elements:
+        return None
+    img_cx, img_cy = shape_center(image_el.x, image_el.y, image_el.width, image_el.height)
+
+    best_el = None
+    best_dist = np.inf
+
+    for el in body_elements:
+        if _token_count(el.text) > max_tokens:
+            continue
+        el_cx, el_cy = shape_center(el.x, el.y, el.width, el.height)
+        distance = np.linalg.norm(img_cx- el_cx, img_cy - el_cy)
+        if distance < best_dist:
+            best_dist = distance
+            best_el = el
+
+    return best_el
+
+
+def classify_presentation(meta: PPTX_META, slides: List[SlideData]) -> DocType:
+
+    high_weight = meta.title.lower()
+
+    body_weights = " ".join(
+        s.title for s in slides[:7]
+    ).lower()
+
+    body_weights+=" " + " ".join(
+        el.text for slide in slides[:7] for el in slide.elements if el.type =="body"
+    ).lower()
+
+    scores: Dict[DocType, int] = {dt: 0 for dt in DocType}
+
+    for doc_type, keywords in DOC_TYPE_SIGNALS.items():
+        for kw in keywords:
+            if kw in high_weight:
+                scores[doc_type] += 2
+            if kw in body_weights:
+                scores[doc_type] += 1
+
+    best = max(scores, key=lambda dt: scores[dt])
+    best_score = scores[best]
+    return best if best_score > 0 else DocType.GENERAL
+
 
 def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
 
@@ -212,10 +286,10 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
         body_els = [e for e in slide_elements if e.type == "body"]
         claimed = set()
 
-        for el in elements:
+        for el in slide_elements:
             if el.type != "image":
                 continue
-            candidate = _find_nearest_text(
+            candidate = find_nearest_text(
                 el,
                 [b for b in body_els if b.element_id not in claimed],
             )
@@ -223,7 +297,7 @@ def extract_slides(pptx_path:str) -> Tuple[List[SlideData], PPTX_META]:
                 el.caption = candidate.text
                 claimed.add(candidate.element_id)
 
-        # Remove claimed caption elements from the element list
+
         elements = [e for e in elements if e.element_id not in claimed]
         slides.append(slide)
 
