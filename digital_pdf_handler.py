@@ -87,21 +87,37 @@ class TableElement:
     context_before: List[str] = field(default_factory=list)
     context_after: List[str] = field(default_factory=list)
 
-def bbox_overlaps(bbox, tb):
+
+def bbox_overlaps(a: tuple, b: tuple) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or
+                a[3] <= b[1] or b[3] <= a[1])
+
+
+def infer_style(font_size: float, is_bold: bool) -> str:
+
+    for threshold, style in HEADING_FONT_THRESHOLDS:
+        if font_size >= threshold:
+            return style
+    if is_bold and font_size >= 11.5:
+        return "Heading 3"
+    return "Normal"
+
+
+
+def add_context_windows(body_elements: list, window: int = CONTEXT_WINDOW):
     pass
 
-def infer_style():
-    pass
 
-def add_context_windows():
-    pass
+def table_to_string(table_data: List[List]) -> str:
+    rows = []
+    for row in table_data:
+        cells = [str(c).strip() if c is not None else "" for c in row]
+        rows.append("|".join(cells))
+    return "\n".join(rows)
 
-def table_to_string():
-    pass
 
-def reading_order_sort():
+def reading_order_sort(elements: list) -> list:
     pass
-
 
 def check_needs_ocr(doc: fitz.Document) -> bool:
 
@@ -274,8 +290,6 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
                 continue
 
             if other.page != el.page:
-                continue
-            if other.bbox[1] < el.bbox[3]:
                 continue
 
             dist = abs(other.bbox[1] - el.bbox[3])
