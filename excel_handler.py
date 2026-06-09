@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
-
+from word_handler import Chunk, _token_count
 
 @dataclass
 class ExcelMeta:
@@ -27,15 +27,15 @@ class ExcelCell:
     style :str= ""
 
 
-@dataclass
-class MergedCell:
-    range_str: str  # e.g. "B1:C2"
-    start_row: int
-    start_col: int
-    end_row: int
-    end_col: int
-    value: Any
-    formula: Optional[str] = None
+# @dataclass
+# class MergedCell:
+#     range_str: str  # e.g. "B1:C2"
+#     start_row: int
+#     start_col: int
+#     end_row: int
+#     end_col: int
+#     value: Any
+#     formula: Optional[str] = None
 
 
 @dataclass
@@ -110,7 +110,7 @@ def detect_header_rows(ws: Worksheet, merge_value: Dict) -> List[int]:
 def build_col_paths(ws: Worksheet, header_rows: List[int],
                      merge_value: Dict) -> Dict[int, str]:
 
-    col_path = Dict[int, str] = {}
+    col_path :Dict[int, str] = {}
     for col in range(1, ws.max_column+1):
         parts = []
         seen = set()
@@ -200,30 +200,30 @@ def extract_rows(excel_path: str) -> Tuple[List[Sheet], ExcelMeta]:
                 if cells:
                     all_rows[row_num] = cells
 
-    header_cells = [
-        all_rows[r] for r in header_row_nums if r in all_rows
-    ]
-    data_cells = [
-        all_rows[r]
-        for r in range(data_start_row, ws_v.max_row + 1)
-        if r in all_rows
-    ]
+        header_cells = [
+            all_rows[r] for r in header_row_nums if r in all_rows
+        ]
+        data_cells = [
+            all_rows[r]
+            for r in range(data_start_row, ws_v.max_row + 1)
+            if r in all_rows
+        ]
 
-    rows_as_dicts = [row_to_dict(row, col_paths) for row in data_cells]
-    rows_as_dicts = [d for d in rows_as_dicts if d]  # drop empty rows
+        rows_as_dicts = [row_to_dict(row, col_paths) for row in data_cells]
+        rows_as_dicts = [d for d in rows_as_dicts if d]  # drop empty rows
 
-    sheet = Sheet(
-        doc_id=doc_id,
-        element_id=element_id,
-        sheet_number=sheet_index,
-        sheet_name=sheet_name,
-        headers=header_cells,
-        col_paths=col_paths,
-        data_rows=data_cells,
-        rows_as_dicts=rows_as_dicts,
-    )
-    sheets.append(sheet)
-    element_id += 1
+        sheet = Sheet(
+            doc_id=doc_id,
+            element_id=element_id,
+            sheet_number=sheet_index,
+            sheet_name=sheet_name,
+            headers=header_cells,
+            col_paths=col_paths,
+            data_rows=data_cells,
+            rows_as_dicts=rows_as_dicts,
+        )
+        sheets.append(sheet)
+        element_id += 1
 
 
     for i, sheet in enumerate(sheets):
@@ -231,3 +231,100 @@ def extract_rows(excel_path: str) -> Tuple[List[Sheet], ExcelMeta]:
         sheet.next_sheet = sheets[i + 1].sheet_number if i < len(sheets) - 1 else 0
 
     return sheets, doc_meta
+
+def build_row_text(row_dict):
+
+    lines = []
+
+    for key, value in row_dict.items():
+        lines.append(f"{key}: {value}")
+
+    return "\n".join(lines)
+
+
+
+def chunk(
+    sheets: List[Sheet],
+    doc_meta: ExcelMeta
+) -> Tuple[List[Chunk], ExcelMeta]:
+
+    chunks = []
+
+    chunk_index = 0
+
+    for sheet in sheets:
+
+        header_text = "\n".join(sheet.col_paths.values())
+
+        rows = sheet.rows_as_dicts
+
+        if not rows:
+            continue
+
+
+        if len(rows) <= 15:
+
+            row_text = "\n\n".join(
+                build_row_text(r)
+                for r in rows
+            )
+
+            full_text = (
+                f"Workbook: {doc_meta.title}\n"
+                f"Sheet: {sheet.sheet_name}\n\n"
+                f"Columns:\n{header_text}\n\n"
+                f"{row_text}"
+            )
+
+            chunks.append(
+                Chunk(
+                    text=full_text,
+                    doc_id=doc_meta.doc_id,
+                    chunk_index=chunk_index,
+                    chunk_type="table",
+                    start_element_id=sheet.element_id,
+                    end_element_id=sheet.element_id,
+                    token_count=_token_count(full_text)
+                )
+            )
+
+            chunk_index += 1
+
+        else:
+
+            window = 25
+            step = 20
+
+            for start in range(0, len(rows), step):
+
+                end = min(start + window, len(rows))
+
+                row_text = "\n\n".join(
+                    build_row_text(r)
+                    for r in rows[start:end]
+                )
+
+                full_text = (
+                    f"Workbook: {doc_meta.title}\n"
+                    f"Sheet: {sheet.sheet_name}\n\n"
+                    f"Columns:\n{header_text}\n\n"
+                    f"{row_text}"
+                )
+
+                chunks.append(
+                    Chunk(
+                        text=full_text,
+                        doc_id=doc_meta.doc_id,
+                        chunk_index=chunk_index,
+                        chunk_type="table",
+                        start_element_id=sheet.element_id,
+                        end_element_id=sheet.element_id,
+                        token_count=_token_count(full_text)
+                    )
+                )
+
+                chunk_index += 1
+
+    return chunks, doc_meta
+
+
