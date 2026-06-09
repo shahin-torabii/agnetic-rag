@@ -328,3 +328,28 @@ def chunk(
     return chunks, doc_meta
 
 
+
+def process_excel(excel_path: str):
+
+    sheets, meta = extract_rows(excel_path)
+
+    chunks, doc_meta= chunk(sheets, meta)
+    return chunks, meta,
+
+
+if __name__ == "__main__":
+    path = r"C:\Users\shahin\Desktop\Logical Circuits - Fall 1404.xlsx"
+
+    chunks, meta = process_excel(path)
+
+    print(f" Excel: {meta.doc_id}")
+    print(f"   Sheets       : {meta.num_sheet}")
+    print(f"   Chunks       : {len(chunks)}")
+
+    for c in chunks:
+        print(
+            f"[{c.chunk_index:03d}] type={c.chunk_type:<14} "
+            f"tokens={c.token_count:<4} "
+        )
+        print(f"       preview : {c.text.strip()}")
+        print("\n")
