@@ -53,31 +53,90 @@ class Sheet:
 
 
 def safe_color(cell) -> str:
-    pass
+    try:
+        rgb = cell.fill.fgColor.rgb
+        return rgb if rgb != "00000000" else ""
+    except Exception:
+        return ""
 
 
 def build_merge_lookup(ws: Worksheet) -> Tuple[Dict, set]:
-    pass
+
+    merge_value: Dict[Tuple[int, int], Any] = {}
+    covered: set = set()
+
+    for rng in ws.merged_cells.ranges:
+        val = ws.cell(rng.min_row, rng.min_col).value
+        first = True
+        for (r, c) in rng.cells:
+            merge_value[(r, c)] = val
+            if first:
+                first = False
+            else:
+                covered.add((r, c))
+
+    return merge_value, covered
 
 def effective_value(ws: Worksheet, row: int, col: int,
                      merge_value: Dict) -> Any:
-    pass
+    if (row, col) in merge_value:
+        return merge_value[(row, col)]
+    return ws.cell(row, col).value
 
 def is_header_row(ws: Worksheet, row_num: int,
                    max_col: int, merge_value: Dict) -> bool:
-    pass
+
+    non_empty = [
+        effective_value(ws, row_num, col_num, merge_value)
+        for col_num in range(1, max_col+1)
+        if effective_value(ws, row_num, col_num, merge_value) is not None
+    ]
+    if not non_empty:
+        return False
+    return all(isinstance(cell_val, str) for cell_val in non_empty)
 
 
 def detect_header_rows(ws: Worksheet, merge_value: Dict) -> List[int]:
-    pass
+
+    header_rows = []
+    for row in range(1, ws.max_row+1):
+        if is_header_row(ws, row, ws.max_column, merge_value):
+            header_rows.append(row)
+        else:
+            break
+
+    return header_rows
 
 def build_col_paths(ws: Worksheet, header_rows: List[int],
                      merge_value: Dict) -> Dict[int, str]:
-    pass
+
+    col_path = Dict[int, str] = {}
+    for col in range(1, ws.max_column+1):
+        parts = []
+        seen = set()
+        for hr in header_rows:
+            value = effective_value(ws, hr, col, merge_value)
+            if value:
+                text = str(value).strip()
+                if text and not text in seen:
+                    parts.append(text)
+                    seen.add(text)
+        parts = ">".join(parts) if parts else f"col_{col}"
+        col_path[col] = parts
+
+    return col_path
 
 def row_to_dict(cells: List[ExcelCell],
                  col_paths: Dict[int, str]) -> Dict[str, Any]:
-        pass
+    row_to_dict = {
+            col_paths[cell.col]: cell.value
+            for cell in cells
+            if cell.value is not None and cell.col in col_paths
+        }
+
+    return row_to_dict
+
+
 
 def extract_rows(excel_path: str) -> Tuple[List[Sheet], ExcelMeta]:
     path = Path(excel_path)
