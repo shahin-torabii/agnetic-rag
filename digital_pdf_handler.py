@@ -377,8 +377,8 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
     return body_elements, pdf_meta
 
 
-def _pick_chunk_params(style: str, doc_type: DocType) -> Tuple[int, int]:
-    """Same logic as docx_processor — style first, doc_type override second."""
+def pick_chunk_params(style: str, doc_type: DocType) -> Tuple[int, int]:
+
 
     profile = DOC_TYPE_PROFILES.get(doc_type, {})
     if style in profile:
@@ -386,7 +386,7 @@ def _pick_chunk_params(style: str, doc_type: DocType) -> Tuple[int, int]:
     return STYLE_CHUNK_PARAMS.get(style, (500, 75))
 
 
-def _build_section_text(elements: List[TextElement]) -> str:
+def build_section_text(elements: List[TextElement]) -> str:
 
     SECTION_MARKERS = {1: "[SECTION]", 2: "[SUBSECTION]", 3: "[SUBSUBSECTION]"}
     lines, last_style = [], None
@@ -405,7 +405,7 @@ def _build_section_text(elements: List[TextElement]) -> str:
     return "\n\n".join(lines)
 
 
-def split_and_chunk(
+def chunk(
         body_elements: list,
         pdf_meta: PdfMeta,
         doc_type: DocType,
@@ -524,8 +524,8 @@ def split_and_chunk(
             end_eid = section_els[-1].element_id
             dominant_style = section_els[0].style
             dominant_path = section_els[0].section_path
-            section_text = _build_section_text(section_els)
-            size, overlap = _pick_chunk_params(dominant_style, doc_type)
+            section_text = build_section_text(section_els)
+            size, overlap = pick_chunk_params(dominant_style, doc_type)
 
             if _token_count(section_text) <= size:
                 chunks.append(Chunk(
@@ -577,7 +577,7 @@ def process_pdf(pdf_path: str):
 
     doc_type = classify_pdf(pdf_meta, body_elements)
     pdf_meta.doc_type = doc_type.value
-    chunks, image_to_chunks, table_to_chunks = split_and_chunk(
+    chunks, image_to_chunks, table_to_chunks = chunk(
         body_elements, pdf_meta, doc_type
     )
     return chunks, pdf_meta, image_to_chunks, table_to_chunks
