@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import fitz
+import numpy as np
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from word_handler import (
@@ -88,6 +89,11 @@ class TableElement:
     context_after: List[str] = field(default_factory=list)
 
 
+
+def bbox_contains(outer: tuple, inner: tuple) -> bool:
+    return (outer[0] <= inner[0] and outer[1] <= inner[1] and
+            outer[2] >= inner[2] and outer[3] >= inner[3])
+
 def bbox_overlaps(a: tuple, b: tuple) -> bool:
     return not (a[2] <= b[0] or b[2] <= a[0] or
                 a[3] <= b[1] or b[3] <= a[1])
@@ -105,7 +111,26 @@ def infer_style(font_size: float, is_bold: bool) -> str:
 
 
 def add_context_windows(body_elements: list, window: int = CONTEXT_WINDOW):
-    pass
+    for idx, element in enumerate(body_elements):
+        if not isinstance(element, (ImageElement, TableElement)):
+            continue
+
+        before, after = [], []
+
+        j = idx - 1
+        while j >= 0 and len(before) < window:
+            if isinstance(body_elements[j], TextElement):
+                before.insert(0, body_elements[j].text)
+            j -= 1
+
+        j = idx + 1
+        while j < len(body_elements) and len(after) < window:
+            if isinstance(body_elements[j], TextElement):
+                after.append(body_elements[j].text)
+            j += 1
+
+        element.context_before = before
+        element.context_after = after
 
 
 def table_to_string(table_data: List[List]) -> str:
@@ -117,7 +142,22 @@ def table_to_string(table_data: List[List]) -> str:
 
 
 def reading_order_sort(elements: list) -> list:
-    pass
+
+    left_xs = sorted(set(round(e.bbox[0]/COLUMN_X_TOLERANCE) * COLUMN_X_TOLERANCE for e in elements))
+
+    if len(left_xs) <=1 or np.abs(left_xs[0] - left_xs[-1]) <=COLUMN_X_TOLERANCE *2:
+        return sorted(elements,key=lambda x: (x.bbox[1], x.bbox[0]))
+
+    mid_x = (left_xs[0] + left_xs[-1]) / 2
+
+    left_col = [e for e in elements if e.bbox[0] < mid_x]
+    right_col = [e for e in elements if e.bbox[0] >= mid_x]
+
+    left_col.sort(key=lambda e: e.bbox[1])
+    right_col.sort(key=lambda e: e.bbox[1])
+
+    return left_col + right_col
+
 
 def check_needs_ocr(doc: fitz.Document) -> bool:
 
@@ -129,7 +169,7 @@ def check_needs_ocr(doc: fitz.Document) -> bool:
     return ratio < OCR_TEXT_RATIO_THRESHOLD
 
 
-def _classify_pdf(meta: PdfMeta, body_elements: list) -> DocType:
+def classify_pdf(meta: PdfMeta, body_elements: list) -> DocType:
     high_weight = meta.title.lower()
 
     body_sample = " ".join(
