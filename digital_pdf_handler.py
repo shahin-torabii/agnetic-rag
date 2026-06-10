@@ -568,3 +568,47 @@ def split_and_chunk(
             i += 1
 
     return chunks, image_to_chunks, table_to_chunks
+
+
+def process_pdf(pdf_path: str):
+    body_elements, pdf_meta = extract_pdf(pdf_path)
+    if pdf_meta.needs_ocr:
+        return [], pdf_meta, {}, {}
+
+    doc_type = classify_pdf(pdf_meta, body_elements)
+    pdf_meta.doc_type = doc_type.value
+    chunks, image_to_chunks, table_to_chunks = split_and_chunk(
+        body_elements, pdf_meta, doc_type
+    )
+    return chunks, pdf_meta, image_to_chunks, table_to_chunks
+
+
+
+
+if __name__ == "__main__":
+    path = ""
+
+    chunks, meta, img_idx, tbl_idx = process_pdf(path)
+
+    if meta.needs_ocr:
+        print(f"⚠️  {meta.doc_id} needs OCR — no text extracted")
+    else:
+        print(f"\n File      : {meta.doc_id}")
+        print(f"   Doc type  : {meta.doc_type}")
+        print(f"   Pages     : {meta.num_pages}")
+        print(f"   Chunks    : {len(chunks)}")
+        print(f"   img→chunk : { {k: len(v) for k, v in img_idx.items()} }")
+        print(f"   tbl→chunk : { {k: len(v) for k, v in tbl_idx.items()} }\n")
+
+        for c in chunks:
+            print(
+                f"[{c.chunk_index:03d}] type={c.chunk_type:<14} "
+                f"style={c.style:<14} tokens={c.token_count:<4} "
+                f"path={c.section_path}"
+            )
+            print(f"       preview : {c.text[:120].strip()}")
+            if c.image_refs:
+                print(f"       images  : {c.image_refs}")
+            if c.table_refs:
+                print(f"       tables  : {list(c.table_refs.keys())}")
+            print()
