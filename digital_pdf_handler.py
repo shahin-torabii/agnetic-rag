@@ -9,7 +9,7 @@ import fitz
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from word_handler import (
-    Chunk, DocType, DOC_TYPE_SIGNALS, _token_count, IMAGE_DIR
+    Chunk, DocType, DOC_TYPE_SIGNALS, _token_count, IMAGE_DIR,DOC_TYPE_PROFILES
 )
 
 os.makedirs(IMAGE_DIR, exist_ok=True)
@@ -127,6 +127,31 @@ def check_needs_ocr(doc: fitz.Document) -> bool:
     )
     ratio = pages_with_text / max(len(doc), 1)
     return ratio < OCR_TEXT_RATIO_THRESHOLD
+
+
+def _classify_pdf(meta: PdfMeta, body_elements: list) -> DocType:
+    high_weight = meta.title.lower()
+
+    body_sample = " ".join(
+        el.text for el in body_elements[:20]
+        if isinstance(el, TextElement)
+    ).lower()
+
+    heading_blob = " ".join(
+        el.text for el in body_elements
+        if isinstance(el, TextElement) and el.style.startswith("Heading")
+    ).lower()
+
+    scores: Dict[DocType, int] = {dt: 0 for dt in DocType}
+    for doc_type, keywords in DOC_TYPE_SIGNALS.items():
+        for kw in keywords:
+            if kw in high_weight:   scores[doc_type] += 2
+            if kw in body_sample:   scores[doc_type] += 1
+            if kw in heading_blob:  scores[doc_type] += 2
+
+    best = max(scores, key=lambda dt: scores[dt])
+    best_score = scores[best]
+    return best if best_score > 0 else DocType.GENERAL
 
 
 def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
@@ -310,3 +335,196 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
 
 
     return body_elements, pdf_meta
+
+
+def _pick_chunk_params(style: str, doc_type: DocType) -> Tuple[int, int]:
+    """Same logic as docx_processor — style first, doc_type override second."""
+
+    profile = DOC_TYPE_PROFILES.get(doc_type, {})
+    if style in profile:
+        return profile[style]
+    return STYLE_CHUNK_PARAMS.get(style, (500, 75))
+
+
+def _build_section_text(elements: List[TextElement]) -> str:
+
+    SECTION_MARKERS = {1: "[SECTION]", 2: "[SUBSECTION]", 3: "[SUBSUBSECTION]"}
+    lines, last_style = [], None
+
+    for el in elements:
+        if el.style.startswith("Heading"):
+            level = int(el.style[-1])
+            marker = SECTION_MARKERS.get(level, "[SECTION]")
+            if el.style != last_style:
+                lines.append(marker)
+                last_style = el.style
+            lines.append(el.text)
+        else:
+            lines.append(el.text)
+
+    return "\n\n".join(lines)
+
+
+def split_and_chunk(
+        body_elements: list,
+        pdf_meta: PdfMeta,
+        doc_type: DocType,
+) -> Tuple[List[Chunk], Dict[tuple, List[Chunk]], Dict[tuple, List[Chunk]]]:
+
+    chunks: List[Chunk] = []
+    image_to_chunks: Dict[tuple, List[Chunk]] = {}
+    table_to_chunks: Dict[tuple, List[Chunk]] = {}
+    chunk_index = 0
+    doc_id = pdf_meta.doc_id
+
+    i = 0
+    while i < len(body_elements):
+        el = body_elements[i]
+
+        if isinstance(el, ImageElement):
+            before_text = " ".join(el.context_before)
+            after_text = " ".join(el.context_after)
+            caption_text = f"Caption: {el.caption}" if el.caption else ""
+            section_prefix = " > ".join(el.section_path)
+
+            full_text = "\n".join(filter(None, [
+                f"[{section_prefix}]" if section_prefix else f"[Page {el.page}]",
+                f"[IMAGE_{el.element_id}]",
+                caption_text,
+                before_text,
+                after_text,
+            ])).strip()
+
+            c = Chunk(
+                text=full_text,
+                doc_id=doc_id,
+                chunk_index=chunk_index,
+                chunk_type="image_context",
+                style="Normal",
+                section_path=el.section_path,
+                start_element_id=el.element_id,
+                end_element_id=el.element_id,
+                image_refs={el.element_id: el.image_path},
+                token_count=_token_count(full_text),
+            )
+            chunks.append(c)
+            image_to_chunks.setdefault((doc_id, el.element_id), []).append(c)
+            chunk_index += 1
+            i += 1
+
+
+        elif isinstance(el, TableElement):
+            rows = el.table.split("\n")
+            context = " ".join(el.context_before)
+            section_prefix = " > ".join(el.section_path)
+
+            header_lines = "\n".join(filter(None, [
+                f"[{section_prefix}]" if section_prefix else f"[Page {el.page}]",
+                context,
+                f"[TABLE_{el.element_id}]",
+            ]))
+
+            if len(rows) <= 15:
+                full_text = f"{header_lines}\n{el.table}".strip()
+                c = Chunk(
+                    text=full_text,
+                    doc_id=doc_id,
+                    chunk_index=chunk_index,
+                    chunk_type="table",
+                    section_path=el.section_path,
+                    start_element_id=el.element_id,
+                    end_element_id=el.element_id,
+                    table_refs={el.element_id: el.table},
+                    token_count=_token_count(full_text),
+                )
+                chunks.append(c)
+                table_to_chunks.setdefault((doc_id, el.element_id), []).append(c)
+                chunk_index += 1
+
+            else:
+                header_row = rows[0]
+                data_rows = rows[1:]
+                window, step = 10, 8
+
+                for w in range(0, len(data_rows), step):
+                    batch = [header_row] + data_rows[w:w + window]
+                    prefix = header_lines if w == 0 else f"[TABLE_{el.element_id} continued]"
+                    full_text = f"{prefix}\n" + "\n".join(batch)
+
+                    c = Chunk(
+                        text=full_text.strip(),
+                        doc_id=doc_id,
+                        chunk_index=chunk_index,
+                        chunk_type="table",
+                        section_path=el.section_path,
+                        start_element_id=el.element_id,
+                        end_element_id=el.element_id,
+                        table_refs={el.element_id: el.table},
+                        token_count=_token_count(full_text),
+                    )
+                    chunks.append(c)
+                    table_to_chunks.setdefault((doc_id, el.element_id), []).append(c)
+                    chunk_index += 1
+
+            i += 1
+
+
+        elif isinstance(el, TextElement):
+
+            section_els: List[TextElement] = []
+            start_eid = el.element_id
+
+            while i < len(body_elements) and isinstance(body_elements[i], TextElement):
+                cur = body_elements[i]
+                if cur.style == "Heading 1" and section_els:
+                    break
+                section_els.append(cur)
+                i += 1
+
+            end_eid = section_els[-1].element_id
+            dominant_style = section_els[0].style
+            dominant_path = section_els[0].section_path
+            section_text = _build_section_text(section_els)
+            size, overlap = _pick_chunk_params(dominant_style, doc_type)
+
+            if _token_count(section_text) <= size:
+                chunks.append(Chunk(
+                    text=section_text,
+                    doc_id=doc_id,
+                    chunk_index=chunk_index,
+                    chunk_type="text",
+                    style=dominant_style,
+                    section_path=dominant_path,
+                    start_element_id=start_eid,
+                    end_element_id=end_eid,
+                    token_count=_token_count(section_text),
+                ))
+                chunk_index += 1
+
+            else:
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=size * 5,
+                    chunk_overlap=overlap * 5,
+                    separators=[
+                        "[SECTION]", "[SUBSECTION]", "[SUBSUBSECTION]",
+                        "\n\n", "\n", ". ", " ", ""
+                    ],
+                )
+                for sc in splitter.split_text(section_text):
+                    chunks.append(Chunk(
+                        text=sc,
+                        doc_id=doc_id,
+                        chunk_index=chunk_index,
+                        chunk_type="text",
+                        style=dominant_style,
+                        section_path=dominant_path,
+                        start_element_id=start_eid,
+                        end_element_id=end_eid,
+                        token_count=_token_count(sc),
+                    ))
+                    chunk_index += 1
+
+        else:
+            i += 1
+
+    return chunks, image_to_chunks, table_to_chunks
