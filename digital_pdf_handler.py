@@ -287,6 +287,9 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
                 element_id=element_counter,
                 doc_id=doc_id,
             ))
+
+
+
         for img_info in page.get_images(full=True):
             xref = img_info[0]
             try:
@@ -302,7 +305,7 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
             with open(image_path, "wb") as f:
                 f.write(img_data["image"])
 
-            # Get bbox from image info on the page
+
             img_rects = page.get_image_rects(xref)
             bbox = tuple(img_rects[0]) if img_rects else (0, 0, 0, 0)
 
@@ -344,7 +347,7 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
             continue
 
         best_text = None
-        best_dist = float("inf")
+        best_dist = np.inf
 
         for j, other in enumerate(body_elements):
             if j in claimed:
@@ -586,7 +589,7 @@ def process_pdf(pdf_path: str):
 
 
 if __name__ == "__main__":
-    path = ""
+    path = r"F:\university\research\my papers\Quantum k-Means Clustering Using Hadamard-Test-Based\Quantum k-Means Clustering Using Hadamard-Test-Based.pdf"
 
     chunks, meta, img_idx, tbl_idx = process_pdf(path)
 
