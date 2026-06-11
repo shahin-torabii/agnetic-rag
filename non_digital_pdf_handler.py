@@ -543,3 +543,35 @@ def chunk(
 
     return chunks, image_to_chunks, table_to_chunks
 
+
+def process_scanned_pdf(pdf_path: str):
+    body_elements, pdf_meta = ocr_extract(pdf_path)
+    doc_type = classify_pdf(pdf_meta, body_elements)
+    pdf_meta.doc_type = doc_type.value
+    chunks, image_to_chunks, table_to_chunks = chunk(body_elements, pdf_meta, doc_type)
+    return chunks, pdf_meta, image_to_chunks, table_to_chunks
+
+
+if __name__ == "__main__":
+
+
+    path = r"D:\rag\ztm\ZeroToMastery - AI Engineering Retrieval Augmented Generation (RAG) for LLMs 2025-8\code\GenAI\RAG\RAG with OpenAI\The chinese cookbook.pdf"
+
+    chunks, meta, img_idx, tbl_idx = process_scanned_pdf(path)
+
+    print(f"\n File      : {meta.doc_id}")
+    print(f"   Doc type  : {meta.doc_type}")
+    print(f"   Pages     : {meta.num_pages}")
+    print(f"   Chunks    : {len(chunks)}")
+    print(f"   img→chunk : { {k: len(v) for k, v in img_idx.items()} }")
+    print(f"   tbl→chunk : { {k: len(v) for k, v in tbl_idx.items()} }\n")
+
+    for c in chunks:
+        print(f"[{c.chunk_index:03d}] type={c.chunk_type:<14} style={c.style:<14} "
+              f"tokens={c.token_count:<4} path={c.section_path}")
+        print(f"       preview : {c.text[:120].strip()}")
+        if c.image_refs:
+            print(f"       images  : {c.image_refs}")
+        if c.table_refs:
+            print(f"       tables  : {list(c.table_refs.keys())}")
+        print()
