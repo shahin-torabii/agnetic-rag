@@ -1,20 +1,22 @@
-from openai import OpenAI
 from enum import Enum
-import re
 from dataclasses import dataclass
-from typing import Optional, List
-from dotenv import load_dotenv
+from data_gathering import UserRequest
+from LLM import HF_LLM
 
 class Intent(str, Enum):
     GENERAL_CHAT = "GENERAL_CHAT"
 
-    DOCUMENT_QA ="DOCUMENT_QA"
+    DOCUMENT_QA = "DOCUMENT_QA"
     DOCUMENT_SECTION_EXPLAIN = "DOCUMENT_SECTION_EXPLAIN"
     DOCUMENT_FULL_EXPLAIN = "DOCUMENT_FULL_EXPLAIN"
     DOCUMENT_SUMMARIZE = "DOCUMENT_SUMMARIZE"
 
     IMAGE_EXPLAIN = "IMAGE_EXPLAIN"
     IMAGE_QA = "IMAGE_QA"
+
+    AUDIO_TRANSCRIBE = "AUDIO_TRANSCRIBE"
+    AUDIO_SUMMARIZE = "AUDIO_SUMMARIZE"
+    AUDIO_QA = "AUDIO_QA"
 
     SEARCH_DOCUMENT = "SEARCH_DOCUMENT"
 
@@ -25,13 +27,17 @@ class Intent(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+
+
 @dataclass
 class QueryContext:
     has_document: bool = False
     has_image: bool = False
-    num_documents: int = 0
-    num_pages: Optional[int] = None
+    has_audio: bool = False
 
+    num_documents: int = 0
+    num_images: int = 0
+    num_audio: int = 0
 
 FA_EXPLAIN = [
     "توضیح",
@@ -119,17 +125,46 @@ EN_ACTION = [
     "questions",
 ]
 
-def contains_any(query:str, keywords:List[str]) -> bool:
+
+EN_AUDIO_TRANSCRIBE = [
+    "transcribe",
+    "speech to text",
+    "convert audio to text",
+]
+
+FA_AUDIO_TRANSCRIBE = [
+    "رونویسی",
+    "تبدیل صوت به متن",
+    "پیاده سازی صوت",
+]
+
+EN_AUDIO_SUMMARIZE = [
+    "summarize audio",
+    "summarize recording",
+    "summarize meeting",
+]
+
+FA_AUDIO_SUMMARIZE = [
+    "خلاصه فایل صوتی",
+    "خلاصه جلسه",
+    "خلاصه کن",
+]
+
+
+def contains_any(query: str, keywords: list[str]) -> bool:
     query = query.lower().strip()
 
-    contains = any(k.lower().strip() in query for k in keywords)
-    return  contains
+    return any(
+        keyword.lower().strip() in query
+        for keyword in keywords
+    )
+
 
 def classify_query(query: str, ctx: QueryContext) -> Intent:
+
     q = query.lower().strip()
 
-
-    if ctx.has_image and not ctx.has_document:
+    if ctx.has_image and not ctx.has_document and not ctx.has_audio:
 
         if (
             contains_any(q, EN_EXPLAIN)
@@ -138,35 +173,51 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
             return Intent.IMAGE_EXPLAIN
 
         return Intent.IMAGE_QA
+    if ctx.has_audio and not ctx.has_document and not ctx.has_image:
+
+        if (
+            contains_any(q, EN_AUDIO_TRANSCRIBE)
+            or contains_any(q, FA_AUDIO_TRANSCRIBE)
+        ):
+            return Intent.AUDIO_TRANSCRIBE
+
+        if (
+            contains_any(q, EN_AUDIO_SUMMARIZE)
+            or contains_any(q, FA_AUDIO_SUMMARIZE)
+        ):
+            return Intent.AUDIO_SUMMARIZE
+
+        return Intent.AUDIO_QA
 
 
     if ctx.num_documents >= 2:
+
         if (
             contains_any(q, EN_COMPARE)
             or contains_any(q, FA_COMPARE)
         ):
             return Intent.COMPARE_DOCUMENTS
 
+
     if ctx.has_document:
 
-        # summarize document
         if (
             contains_any(q, EN_SUMMARIZE)
             or contains_any(q, FA_SUMMARIZE)
         ):
             return Intent.DOCUMENT_SUMMARIZE
 
-        # explain whole document
         if (
-            contains_any(q, EN_EXPLAIN)
-            or contains_any(q, FA_EXPLAIN)
+            contains_any(q, EN_SEARCH)
+            or contains_any(q, FA_SEARCH)
         ):
-            if not (
-                contains_any(q, EN_SECTION)
-                or contains_any(q, FA_SECTION)
-            ):
-                return Intent.DOCUMENT_FULL_EXPLAIN
+            return Intent.SEARCH_DOCUMENT
 
+        if (
+            contains_any(q, EN_ACTION)
+            or contains_any(q, FA_ACTION)
+        ):
+            return Intent.DOCUMENT_ACTION
 
         if (
             contains_any(q, EN_SECTION)
@@ -178,50 +229,21 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
             ):
                 return Intent.DOCUMENT_SECTION_EXPLAIN
 
-
         if (
-            contains_any(q, EN_SEARCH)
-            or contains_any(q, FA_SEARCH)
+            contains_any(q, EN_EXPLAIN)
+            or contains_any(q, FA_EXPLAIN)
         ):
-            return Intent.SEARCH_DOCUMENT
-
-
-        if (
-            contains_any(q, EN_ACTION)
-            or contains_any(q, FA_ACTION)
-        ):
-            return Intent.DOCUMENT_ACTION
+            return Intent.DOCUMENT_FULL_EXPLAIN
 
         return Intent.DOCUMENT_QA
 
-
-    return Intent.GENERAL_CHAT
-
-from openai import OpenAI
+    return Intent.UNKNOWN
 
 
-VALID_CLASSES = {
-    "GENERAL_CHAT",
-    "DOCUMENT_QA",
-    "DOCUMENT_SECTION_EXPLAIN",
-    "DOCUMENT_FULL_EXPLAIN",
-    "DOCUMENT_SUMMARIZE",
-    "IMAGE_EXPLAIN",
-    "IMAGE_QA",
-    "SEARCH_DOCUMENT",
-    "COMPARE_DOCUMENTS",
-    "DOCUMENT_ACTION",
-    "HIERARCHICAL_SUMMARIZATION",
-}
+def llm_router(query: str, ctx) -> Intent:
 
 
-def llm_router(query: str, ctx, hf_api_key: str) -> str:
-
-    client = OpenAI(
-        api_key=hf_api_key,
-        base_url="https://router.huggingface.co/v1",
-    )
-
+    client = HF_LLM.client
     model_name = "Qwen/Qwen3-4B-Instruct-2507"
 
     system_prompt = """
@@ -239,13 +261,15 @@ DOCUMENT_SUMMARIZE
 IMAGE_EXPLAIN
 IMAGE_QA
 
+  AUDIO_TRANSCRIBE
+    AUDIO_SUMMARIZE
+    AUDIO_QA
+
 SEARCH_DOCUMENT
 
 COMPARE_DOCUMENTS
 
 DOCUMENT_ACTION
-
-HIERARCHICAL_SUMMARIZATION
 
 Rules:
 
@@ -253,14 +277,12 @@ Rules:
 - No explanation.
 - No markdown.
 - No extra text.
-
-HIERARCHICAL_SUMMARIZATION should be selected when:
-- the user asks to explain or summarize an entire large document
-- document pages > 25
-
-DOCUMENT_FULL_EXPLAIN should be selected when:
-- the user asks to explain the whole document
-- document pages <= 25
+-Classify ONLY the user intent.
+Do not decide:
+- chunking
+- retrieval strategy
+- summarization strategy
+- document size handling
 """
 
     user_prompt = f"""
@@ -270,7 +292,6 @@ Context:
 has_image: {ctx.has_image}
 has_document: {ctx.has_document}
 num_documents: {ctx.num_documents}
-num_pages: {ctx.num_pages}
 """
 
     response = client.chat.completions.create(
@@ -283,16 +304,58 @@ num_pages: {ctx.num_pages}
         ],
     )
 
-    query_class = response.choices[0].message.content.strip()
+    query_class = response.choices[0].message.content.strip().split()[0].replace(".", "")
 
-    if query_class not in VALID_CLASSES:
-        return "GENERAL_CHAT"
+    try:
+        intent = Intent(query_class)
+    except ValueError:
+        intent = Intent.GENERAL_CHAT
 
-    return query_class
+    return intent
 
 
-def route_query(query:str, ctx : QueryContext):
-    intent = classify_query(query, ctx)
+
+def route_query(request: UserRequest):
+
+    has_image = (
+        request.images is not None
+        and len(request.images) > 0
+    )
+
+    has_document = (
+        request.documents is not None
+        and len(request.documents) > 0
+    )
+
+    has_audio = (
+        request.audio is not None
+        and len(request.audio) > 0
+    )
+
+    ctx = QueryContext(
+        has_image=has_image,
+        has_document=has_document,
+        has_audio=has_audio,
+
+        num_images=len(request.images)
+        if request.images else 0,
+
+        num_documents=len(request.documents)
+        if request.documents else 0,
+
+        num_audio=len(request.audio)
+        if request.audio else 0,
+    )
+
+    intent = classify_query(
+        request.query,
+        ctx
+    )
 
     if intent == Intent.UNKNOWN:
-        intent = llm_router(query, ctx)
+        intent = llm_router(
+            request.query,
+            ctx
+        )
+
+    return intent, ctx

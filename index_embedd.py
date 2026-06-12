@@ -228,7 +228,7 @@ def initialize():
     load_api_key()
     initialize_models()
 
-    if os.path.exists("vector_store"):
-        load("vector_store")
+    # if os.path.exists("vector_store"):
+    #     load("vector_store")
 
     _initialized = True

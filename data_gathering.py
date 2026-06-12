@@ -2,8 +2,6 @@ from dataclasses import  dataclass, field
 from typing import List, Dict, Tuple
 from enum import Enum
 
-
-
 @dataclass
 class BaseMeta:
     doc_id: str
@@ -26,6 +24,13 @@ class Chunk:
     image_refs: Dict[int, str] = field(default_factory=dict)
     table_refs: Dict[int, str] = field(default_factory=dict)
     token_count: int = 0
+
+@dataclass
+class UserRequest:
+    query: str
+    images: list = None
+    documents: list = None
+    audio:list = None
 
 
 ChunkKey = Tuple[str, int]
@@ -186,12 +191,6 @@ def ingest(
         Data.chunks.append(chunk)
 
         Data.chunk_by_key[chunk_key] = chunk
-
-        Data.chunks_by_doc.setdefault(
-            chunk.doc_id,
-            []
-        ).append(chunk_key)
-
 
     for image_key, chunk_keys in img_to_ch.items():
         Data.image_to_chunks.setdefault(
