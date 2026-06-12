@@ -7,13 +7,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
-from word_handler import Chunk, _token_count
-
+from data_gathering import (
+Chunk, _token_count,BaseMeta
+)
 @dataclass
-class ExcelMeta:
-    doc_id:str
-    title :str
-    num_sheet:int
+class ExcelMeta(BaseMeta):
+    num_sheet:int = 0
 
 
 
@@ -153,6 +152,7 @@ def extract_rows(excel_path: str) -> Tuple[List[Sheet], ExcelMeta]:
     doc_meta = ExcelMeta(
         doc_id=doc_id,
         title = title,
+        source_type="xlsx",
         num_sheet=len(wb_val.sheetnames)
     )
     sheets:List[Sheet] = []

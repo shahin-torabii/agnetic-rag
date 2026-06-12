@@ -4,15 +4,14 @@ from typing import Dict, Tuple, List
 from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from word_handler import Chunk, DocType, DOC_TYPE_SIGNALS, _token_count
-
-
+from data_gathering import (
+Chunk, DocType, DOC_TYPE_SIGNALS, _token_count, DOC_TYPE_PROFILES,BaseMeta
+)
 
 @dataclass
-class TranscriptMeta:
-    doc_id: str
-    len_audio: float
-    text_type: str = ""
+class TranscriptMeta(BaseMeta):
+    len_audio: float = 0
+
 
 
 @dataclass
@@ -77,6 +76,8 @@ def create_transcriptions(audio_path: str) -> Tuple[Transcript, TranscriptMeta]:
 
     meta = TranscriptMeta(
         doc_id=doc_id,
+        source_type="audio",
+        title=doc_id,
         len_audio=len_audio
     )
 
@@ -113,7 +114,7 @@ def pick_chunk_params(doc_type: DocType) -> Tuple[int, int]:
 def chunk(transcript: Transcript, meta: TranscriptMeta) -> Tuple[List[Chunk], TranscriptMeta]:
 
     doc_type = classify_doc(meta, transcript.text)
-    meta.text_type = doc_type
+    meta.doc_type = doc_type
 
     chunk_size, overlap = pick_chunk_params(doc_type)
 

@@ -10,17 +10,13 @@ import os
 from pathlib import Path
 from typing import List, Optional, Tuple , Dict
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-import re
-
-from sympy.series.limitseq import dominant
+from data_gathering import (
+Chunk, DocType, DOC_TYPE_SIGNALS, _token_count, IMAGE_DIR, DOC_TYPE_PROFILES,BaseMeta, BASE_STYLE_PARAMS
+)
 
 
 @dataclass
-class DocMeta:
-
-    doc_id: str
-    title: str = ""
-    doc_type: str = "GENERAL"
+class DocMeta(BaseMeta):
     headers: List[str] = field(default_factory=list)
     footers: List[str] = field(default_factory=list)
 
@@ -69,136 +65,6 @@ class SectionNode:
     children: list = field(default_factory=list)  # List[SectionNode]
 
 
-@dataclass
-class Chunk:
-
-    text: str
-    doc_id: str
-    chunk_index: int
-    chunk_type: str
-    style: str = "Normal"
-    section_path: List[str] = field(default_factory=list)
-    start_element_id: int = None
-    end_element_id: int = None
-    image_refs: Dict[int, str] = field(default_factory=dict)
-    table_refs: Dict[int, str] = field(default_factory=dict)
-    token_count: int = 0
-
-
-class DocType(str, Enum):
-    RESUME = "RESUME"
-    EMAIL = "EMAIL"
-    LEGAL = "LEGAL"
-    ACADEMIC = "ACADEMIC"
-    TECHNICAL = "TECHNICAL"
-    REPORT = "REPORT"
-    GENERAL = "GENERAL"
-
-DOC_TYPE_SIGNALS : Dict[DocType, List[str]] ={
-    DocType.RESUME: [
-        "resume", "curriculum vitae", "cv", "work experience",
-        "education", "skills", "objective", "references",
-        "employment history", "professional experience",
-        "سوابق شغلی", "تجربه کاری", "مهارت‌ها", "توانایی‌ها",
-        "تحصیلات", "رزومه", "زندگی‌نامه", "اهداف شغلی",
-    ],
-
-    DocType.EMAIL: [
-        "from:", "to:", "cc:", "subject:", "dear", "regards",
-        "sincerely", "forwarded message", "reply", "attachment",
-        "با احترام", "از طرف", "به:", "موضوع:",
-        "ارادتمند", "پیام فوروارد شده",
-    ],
-
-    DocType.LEGAL: [
-        "whereas", "hereinafter", "party", "agreement", "contract",
-        "clause", "terms and conditions", "liability", "jurisdiction",
-        "witnesseth", "indemnity",
-        "قرارداد", "ماده", "تبصره", "طرفین", "تعهدات",
-        "شرایط و ضوابط", "مسئولیت", "صلاحیت قضایی",
-    ],
-
-    DocType.ACADEMIC: [
-        "abstract", "introduction", "methodology", "results",
-        "conclusion", "references", "literature review", "hypothesis",
-        "discussion", "experiment", "analysis",
-        "چکیده", "مقدمه", "روش‌شناسی", "نتایج",
-        "نتیجه‌گیری", "منابع", "بررسی ادبیات",
-        "فرضیه", "بحث", "تحلیل",
-    ],
-
-    DocType.TECHNICAL: [
-        "architecture", "implementation", "algorithm", "api",
-        "specification", "module", "interface", "configuration",
-        "deployment", "system design", "performance",
-        "fpga", "routing", "hardware", "firmware", "protocol",
-        "database", "backend", "frontend",
-        "پیاده‌سازی", "معماری", "الگوریتم",
-        "پیکربندی", "رابط", "ماژول",
-        "پروتکل", "سیستم", "کارایی",
-    ],
-
-    DocType.REPORT: [
-        "executive summary", "findings", "recommendations",
-        "overview", "background", "scope", "appendix",
-        "methodology", "results", "discussion",
-        "خلاصه اجرایی", "یافته‌ها", "پیشنهادات",
-        "بررسی کلی", "پیش‌زمینه", "دامنه",
-        "ضمیمه", "گزارش", "نتایج",
-    ],
-}
-
-
-DOC_TYPE_PROFILES : Dict[DocType, Dict[str, Tuple[int, int]]]={
- DocType.RESUME: {
-
-        "Normal":    (150, 20),
-        "Heading 1": (80,  10),
-        "Heading 2": (80,  10),
-    },
-    DocType.EMAIL: {
-        "Normal":    (300, 20),
-    },
-    DocType.LEGAL: {
-
-        "Normal":    (400, 100),
-        "Heading 1": (128, 20),
-        "Heading 2": (128, 20),
-    },
-    DocType.ACADEMIC: {
-        "Normal":    (600, 80),
-        "Heading 1": (128, 20),
-        "Heading 2": (128, 20),
-    },
-    DocType.TECHNICAL: {
-        # Technical: code/specs need precision, smaller chunks
-        "Normal":    (350, 50),
-        "Heading 1": (128, 10),
-        "Heading 2": (128, 10),
-    },
-    DocType.REPORT: {
-        "Normal":    (500, 75),
-        "Heading 1": (128, 20),
-        "Heading 2": (128, 20),
-    },
-    DocType.GENERAL: {
-        "Normal":    (500, 75),
-        "Heading 1": (128, 10),
-        "Heading 2": (128, 10),
-    },
-}
-
-BASE_STYLE_PARAMS: Dict[str, Tuple[int, int]] = {
-    "Title":          (128, 10),
-    "Heading 1":      (128, 10),
-    "Heading 2":      (128, 10),
-    "Heading 3":      (128, 10),
-    "Heading 4":      (128, 10),
-    "Caption":        (100, 10),
-    "Figure Caption": (100, 10),
-    "Table Caption":  (100, 10),
-    "Normal":         (500, 75),
-}
 
 def classify_document(doc_meta: DocMeta, body_elements:list) -> DocType:
 
@@ -244,7 +110,6 @@ def pick_chunk_size(doc_type:DocType, chunk_type:str , style:str) -> Tuple[int, 
         else:
             return BASE_STYLE_PARAMS.get(style, (500, 75))
 
-IMAGE_DIR = "images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 
@@ -266,9 +131,6 @@ SECTION_MARKERS = {
     4: "[SUBSUBSUBSECTION]",
 }
 
-
-def _token_count(text: str) -> int:
-    return len(text.split())
 
 
 def iter_block_items(parent):
@@ -316,7 +178,7 @@ def extract_element(docx_path: str) -> Tuple[list, DocMeta]:
     except Exception:
         title = ""
 
-    doc_meta = DocMeta(doc_id = doc_id, title= title, headers=headers, footers= footers)
+    doc_meta = DocMeta(doc_id = doc_id, title= title, source_type="docx",headers=headers, footers= footers)
 
     image_counter = 0
     image_map :Dict[str, str] = {}

@@ -9,9 +9,7 @@ import fitz
 import numpy as np
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from word_handler import (
-    Chunk, DocType, DOC_TYPE_SIGNALS, _token_count, IMAGE_DIR,DOC_TYPE_PROFILES
-)
+
 
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
@@ -42,11 +40,7 @@ COLUMN_X_TOLERANCE = 50.0
 
 
 @dataclass
-class PdfMeta:
-
-    doc_id: str
-    title: str = ""
-    doc_type: str = "GENERAL"
+class PdfMeta(BaseMeta):
     num_pages: int = 0
     needs_ocr: bool = False
 
@@ -209,6 +203,7 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
     pdf_meta = PdfMeta(
         doc_id=doc_id,
         title=meta_title,
+        source_type="pdf",
         num_pages=len(doc),
         needs_ocr=needs_ocr,
     )
@@ -589,7 +584,7 @@ def process_pdf(pdf_path: str):
 
 
 if __name__ == "__main__":
-    path = r"F:\university\research\my papers\Quantum k-Means Clustering Using Hadamard-Test-Based\Quantum k-Means Clustering Using Hadamard-Test-Based.pdf"
+    path = r"F:\university\os\03_os_dualmode.pdf"
 
     chunks, meta, img_idx, tbl_idx = process_pdf(path)
 
