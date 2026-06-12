@@ -11,6 +11,7 @@ class BaseMeta:
     source_type: str = ""
     doc_type: str = "General"
 
+
 @dataclass
 class Chunk:
 
