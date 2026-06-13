@@ -1,11 +1,12 @@
 from query_router import route_query, Intent
 from data_gathering import UserRequest
 from LLM import HF_LLM, encode_image_to_base64
-from index_embedd import index_images, VectorStore, get_image_id
+from index_embedd import index_images, VectorStore, get_image_id, index_chunks, index_chunk_images
 from typing import List
-from retreival import retrieval_image
+from retreival import retrieval_image, retrieval
 from pathlib import Path
-
+from chunking_handlers.audio_hanlder import process_audio
+from data_gathering import ingest, Chunk
 
 
 def send_images_to_vlm(image_paths: list[str],query: str):
@@ -58,6 +59,10 @@ def ingest_image(image_paths:List[str]):
 
     index_images(not_indexed_images)
 
+def index_to_faiss(chunks:List[Chunk]):
+    index_chunks(chunks)
+    index_chunk_images(chunks)
+
 
 def handle_image(intent, request):
     image_paths = [image_path for image_path in request.images]
@@ -76,8 +81,46 @@ def handle_image(intent, request):
             print(response)
 
 
-def handle_audio(intent, request):
+def summarize_chunks(chunks, meta_audio):
     pass
+
+
+
+def handle_audio(intent, request):
+
+    audios_chunks = []
+    transcripts = []
+    meta_audio = []
+
+    for audio_path in request.audio:
+
+        chunks, transcript, meta = process_audio(audio_path)
+
+        audios_chunks.extend(chunks)
+        transcripts.append(transcript)
+        meta_audio.append(meta)
+
+        ingest(
+            chunks=chunks,
+            doc_meta=meta,
+            img_to_ch=None,
+            tbl_to_ch=None
+        )
+
+        index_to_faiss(chunks)
+
+    match intent:
+
+        case Intent.AUDIO_TRANSCRIBE:
+            return "\n".join(transcripts)
+
+        case Intent.AUDIO_QA:
+            result = retrieval(query=request.query,k=10,is_doc=True)
+
+        case Intent.AUDIO_SUMMARIZE:
+            summary  = summarize_chunks(chunks=chunks,meta=meta_audio)
+        case _:
+            return "\n".join(transcripts)
 
 
 def handle_general(intent, request):

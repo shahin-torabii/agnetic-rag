@@ -46,6 +46,7 @@ class Data:
 
     chunk_by_key: Dict[ChunkKey, Chunk] = {}
 
+    chunk_keys = set()
 
     image_to_chunks: Dict[MediaKey, List[ChunkKey]] = {}
 
@@ -187,19 +188,24 @@ def ingest(
 
     for chunk in chunks:
         chunk_key = (chunk.doc_id, chunk.chunk_index)
+        if chunk_key not in Data.chunk_keys:
+            Data.chunks.append(chunk)
 
-        Data.chunks.append(chunk)
+            Data.chunk_by_key[chunk_key] = chunk
+            Data.chunk_keys.add(chunk_key)
 
-        Data.chunk_by_key[chunk_key] = chunk
+    if img_to_ch is not None:
+        for image_key, chunk_keys in img_to_ch.items():
+            if not chunk_keys in Data.image_to_chunks.values():
+                Data.image_to_chunks.setdefault(
+                    image_key,
+                    []
+                ).extend(chunk_keys)
 
-    for image_key, chunk_keys in img_to_ch.items():
-        Data.image_to_chunks.setdefault(
-            image_key,
-            []
-        ).extend(chunk_keys)
-
-    for table_key, chunk_keys in tbl_to_ch.items():
-        Data.table_to_chunks.setdefault(
-            table_key,
-            []
-        ).extend(chunk_keys)
+    if tbl_to_ch is not None:
+        for table_key, chunk_keys in tbl_to_ch.items():
+            if not chunk_keys in Data.image_to_chunks.values():
+                Data.table_to_chunks.setdefault(
+                    table_key,
+                    []
+                ).extend(chunk_keys)
