@@ -6,6 +6,7 @@ from LLM import HF_LLM
 class Intent(str, Enum):
     GENERAL_CHAT = "GENERAL_CHAT"
 
+    DOCUMENT_OVERVIEW = "DOCUMENT_OVERVIEW"
     DOCUMENT_QA = "DOCUMENT_QA"
     DOCUMENT_SECTION_EXPLAIN = "DOCUMENT_SECTION_EXPLAIN"
     DOCUMENT_FULL_EXPLAIN = "DOCUMENT_FULL_EXPLAIN"
@@ -14,7 +15,7 @@ class Intent(str, Enum):
     IMAGE_UNDERSTANDING = "IMAGE_UNDERSTANDING"
     IMAGE_SEARCH = "IMAGE_SEARCH"
 
-
+    AUDIO_OVERVIEW = "AUDIO_OVERVIEW"
     AUDIO_TRANSCRIBE = "AUDIO_TRANSCRIBE"
     AUDIO_SUMMARIZE = "AUDIO_SUMMARIZE"
     AUDIO_QA = "AUDIO_QA"
@@ -83,6 +84,42 @@ FA_ACTION = [
     "سوال",
     "تمرین",
     "quiz",
+]
+
+
+EN_OVERVIEW = [
+    "what is this about",
+    "what is this pdf about",
+    "what is this file about",
+    "overview",
+    "give me an overview",
+    "high level overview",
+    "main idea",
+    "main topic",
+    "topic",
+    "subject",
+    "what does it discuss",
+    "what does this discuss",
+    "what is being discussed",
+]
+
+FA_OVERVIEW = [
+    "درباره چیست",
+    "در مورد چیست",
+    "موضوع چیست",
+    "موضوع فایل چیست",
+    "موضوع این فایل چیست",
+    "موضوع این سند چیست",
+    "موضوع این pdf چیست",
+    "این فایل درباره چیست",
+    "این سند درباره چیست",
+    "این مقاله درباره چیست",
+    "این صوت درباره چیست",
+    "مرور کلی",
+    "نمای کلی",
+    "دید کلی",
+    "ایده اصلی",
+    "موضوع اصلی",
 ]
 
 
@@ -178,14 +215,20 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
     if ctx.has_audio and not ctx.has_document and not ctx.has_image:
 
         if (
-            contains_any(q, EN_AUDIO_TRANSCRIBE)
-            or contains_any(q, FA_AUDIO_TRANSCRIBE)
+                contains_any(q, EN_AUDIO_TRANSCRIBE)
+                or contains_any(q, FA_AUDIO_TRANSCRIBE)
         ):
             return Intent.AUDIO_TRANSCRIBE
 
         if (
-            contains_any(q, EN_AUDIO_SUMMARIZE)
-            or contains_any(q, FA_AUDIO_SUMMARIZE)
+                contains_any(q, EN_OVERVIEW)
+                or contains_any(q, FA_OVERVIEW)
+        ):
+            return Intent.AUDIO_OVERVIEW
+
+        if (
+                contains_any(q, EN_AUDIO_SUMMARIZE)
+                or contains_any(q, FA_AUDIO_SUMMARIZE)
         ):
             return Intent.AUDIO_SUMMARIZE
 
@@ -200,40 +243,45 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
         ):
             return Intent.COMPARE_DOCUMENTS
 
-
     if ctx.has_document:
 
         if (
-            contains_any(q, EN_SUMMARIZE)
-            or contains_any(q, FA_SUMMARIZE)
+                contains_any(q, EN_OVERVIEW)
+                or contains_any(q, FA_OVERVIEW)
+        ):
+            return Intent.DOCUMENT_OVERVIEW
+
+        if (
+                contains_any(q, EN_SUMMARIZE)
+                or contains_any(q, FA_SUMMARIZE)
         ):
             return Intent.DOCUMENT_SUMMARIZE
 
         if (
-            contains_any(q, EN_SEARCH)
-            or contains_any(q, FA_SEARCH)
+                contains_any(q, EN_SEARCH)
+                or contains_any(q, FA_SEARCH)
         ):
             return Intent.SEARCH_DOCUMENT
 
         if (
-            contains_any(q, EN_ACTION)
-            or contains_any(q, FA_ACTION)
+                contains_any(q, EN_ACTION)
+                or contains_any(q, FA_ACTION)
         ):
             return Intent.DOCUMENT_ACTION
 
         if (
-            contains_any(q, EN_SECTION)
-            or contains_any(q, FA_SECTION)
+                contains_any(q, EN_SECTION)
+                or contains_any(q, FA_SECTION)
         ):
             if (
-                contains_any(q, EN_EXPLAIN)
-                or contains_any(q, FA_EXPLAIN)
+                    contains_any(q, EN_EXPLAIN)
+                    or contains_any(q, FA_EXPLAIN)
             ):
                 return Intent.DOCUMENT_SECTION_EXPLAIN
 
         if (
-            contains_any(q, EN_EXPLAIN)
-            or contains_any(q, FA_EXPLAIN)
+                contains_any(q, EN_EXPLAIN)
+                or contains_any(q, FA_EXPLAIN)
         ):
             return Intent.DOCUMENT_FULL_EXPLAIN
 

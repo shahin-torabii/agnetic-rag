@@ -6,8 +6,13 @@ from typing import List
 from retreival import retrieval_image, retrieval
 from pathlib import Path
 from chunking_handlers.audio_hanlder import process_audio
+from chunking_handlers.non_digital_pdf_handler import process_scanned_pdf
+from chunking_handlers.digital_pdf_handler import process_pdf
+from chunking_handlers.word_handler import process_docx
+from chunking_handlers.pp_handler import process_pptx
+from chunking_handlers.excel_handler import process_excel
 from data_gathering import ingest, Chunk
-
+import puremagic
 
 def send_images_to_vlm(image_paths: list[str],query: str):
     content = [
@@ -46,6 +51,56 @@ def send_images_to_vlm(image_paths: list[str],query: str):
     return response.choices[0].message.content
 
 
+
+def detect_file_type(file_path):
+    path = Path(file_path)
+
+    suffix, mime = None, None
+
+    if path.exists():
+        suffix = path.suffix
+        mime = puremagic.from_file(str(path), mime=True)
+
+    return mime, suffix, path
+
+
+def get_doc_chunks(file_path):
+    mime, suffix, path = detect_file_type(file_path)
+    if mime == "application/pdf":
+        #pdf
+        chunks, meta, img_idx, tbl_idx = process_pdf(file_path)
+        if chunks == []:
+            return process_scanned_pdf(file_path)
+
+        return  chunks, meta, img_idx, tbl_idx
+
+    if mime in [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword"
+    ]:
+        #word
+        return process_docx(file_path)
+
+
+    if mime in [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel"
+    ]:
+        return process_excel(file_path)
+
+    if mime in [
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-powerpoint"
+    ]:
+
+        return process_pptx(file_path)
+    # if mime.startswith("video/"):
+    #     return "Video"
+
+    return "invalid"
+
+
+
 def ingest_image(image_paths:List[str]):
     not_indexed_images = []
     for im_path in image_paths:
@@ -74,17 +129,25 @@ def handle_image(intent, request):
                 response = send_images_to_vlm(image_paths, request)
                 print(response)
             else:
-                result = retrieval_image(request.query)
+                result = retrieval(request.query, k = 5 , is_doc=False)
                 ##TODO send results along query to llm for final result
         case Intent.IMAGE_UNDERSTANDING:
             response = send_images_to_vlm(image_paths, request)
             print(response)
 
 
-def summarize_chunks(chunks, meta_audio):
+def summarize_chunks(chunks, meta_data):
     pass
 
 
+
+
+def overview_func(chunks, meta):
+    pass
+
+
+def explain_doc(chunks, meta, full_explanation = False, query = None):
+    pass
 
 def handle_audio(intent, request):
 
@@ -119,6 +182,8 @@ def handle_audio(intent, request):
 
         case Intent.AUDIO_SUMMARIZE:
             summary  = summarize_chunks(chunks=chunks,meta=meta_audio)
+        case Intent.AUDIO_OVERVIEW:
+            overview = overview_func(chunks, meta_audio)
         case _:
             return "\n".join(transcripts)
 
@@ -128,8 +193,38 @@ def handle_general(intent, request):
 
 
 def handle_document(intent, request):
-    pass
+    docs_chunks, docs_meta, docs_img_idx, docs_tbl_idx =  [], [], [], []
 
+    for doc_path in request.documents:
+        chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
+
+        docs_chunks.append(chunks)
+        docs_meta.append(meta)
+        docs_img_idx.append(img_idx)
+        docs_tbl_idx.append(tbl_idx)
+
+        ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
+        index_to_faiss(chunks)
+
+    match intent:
+        case Intent.DOCUMENT_SUMMARIZE:
+            summary = summarize_chunks(docs_chunks, docs_meta)
+        case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
+            result = retrieval(query=request.query, k=10, is_doc=True)
+        case Intent.DOCUMENT_OVERVIEW:
+            overview = overview_func(docs_chunks, docs_meta)
+        case Intent.DOCUMENT_FULL_EXPLAIN:
+            explain_doc(docs_chunks, docs_meta, full_explanation=True)
+        case Intent.DOCUMENT_SECTION_EXPLAIN:
+            explain_doc(docs_chunks, docs_meta, full_explanation=False, query= request.query)
+        case Intent.COMPARE_DOCUMENTS:
+            pass
+        case Intent.DOCUMENT_ACTION:
+            pass
+        case _:
+            raise ValueError(
+                f"Unhandled intent: {intent}"
+            )
 
 def handle_query(request:UserRequest):
     intent = route_query(request)

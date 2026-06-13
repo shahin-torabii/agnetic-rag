@@ -1,5 +1,5 @@
 from dataclasses import  dataclass, field
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 from enum import Enum
 
 @dataclass
@@ -48,10 +48,10 @@ class Data:
 
     chunk_keys = set()
 
-    image_to_chunks: Dict[MediaKey, List[ChunkKey]] = {}
+    image_to_chunks: Dict[MediaKey, Set[ChunkKey]] = {}
 
 
-    table_to_chunks: Dict[MediaKey, List[ChunkKey]] = {}
+    table_to_chunks: Dict[MediaKey, Set[ChunkKey]] = {}
 
 
 
@@ -196,16 +196,14 @@ def ingest(
 
     if img_to_ch is not None:
         for image_key, chunk_keys in img_to_ch.items():
-            if not chunk_keys in Data.image_to_chunks.values():
-                Data.image_to_chunks.setdefault(
-                    image_key,
-                    []
-                ).extend(chunk_keys)
+            Data.image_to_chunks.setdefault(
+                image_key,
+                set()
+            ).update(chunk_keys)
 
     if tbl_to_ch is not None:
         for table_key, chunk_keys in tbl_to_ch.items():
-            if not chunk_keys in Data.image_to_chunks.values():
                 Data.table_to_chunks.setdefault(
                     table_key,
-                    []
-                ).extend(chunk_keys)
+                    set()
+                ).update(chunk_keys)
