@@ -11,8 +11,9 @@ class Intent(str, Enum):
     DOCUMENT_FULL_EXPLAIN = "DOCUMENT_FULL_EXPLAIN"
     DOCUMENT_SUMMARIZE = "DOCUMENT_SUMMARIZE"
 
-    IMAGE_EXPLAIN = "IMAGE_EXPLAIN"
-    IMAGE_QA = "IMAGE_QA"
+    IMAGE_UNDERSTANDING = "IMAGE_UNDERSTANDING"
+    IMAGE_SEARCH = "IMAGE_SEARCH"
+
 
     AUDIO_TRANSCRIBE = "AUDIO_TRANSCRIBE"
     AUDIO_SUMMARIZE = "AUDIO_SUMMARIZE"
@@ -167,12 +168,13 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
     if ctx.has_image and not ctx.has_document and not ctx.has_audio:
 
         if (
-            contains_any(q, EN_EXPLAIN)
-            or contains_any(q, FA_EXPLAIN)
+                contains_any(q, EN_SEARCH)
+                or contains_any(q, FA_SEARCH)
         ):
-            return Intent.IMAGE_EXPLAIN
+            return Intent.IMAGE_SEARCH
 
-        return Intent.IMAGE_QA
+        return Intent.IMAGE_UNDERSTANDING
+
     if ctx.has_audio and not ctx.has_document and not ctx.has_image:
 
         if (
@@ -258,8 +260,8 @@ DOCUMENT_SECTION_EXPLAIN
 DOCUMENT_FULL_EXPLAIN
 DOCUMENT_SUMMARIZE
 
-IMAGE_EXPLAIN
-IMAGE_QA
+IMAGE_UNDERSTANDING
+IMAGE_SEARCH
 
   AUDIO_TRANSCRIBE
     AUDIO_SUMMARIZE

@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 import os
 import pickle
 from data_gathering import Data
+from pathlib import Path
+import hashlib
 
 
 
@@ -27,12 +29,22 @@ class VectorStore:
     text_index = None
     text_meta = {}
 
+    doc_image_index = None
+    doc_image_meta = {}
+
     image_index = None
     image_meta = {}
 
+    indexed_images =  set()
     indexed_chunks = set()
-    indexed_images = set()
+    indexed_doc_images = set()
     indexed_docs = set()
+
+
+def get_image_id(path: Path):
+    return hashlib.md5(
+        path.read_bytes()
+    ).hexdigest()
 
 
 def set_environ():
@@ -126,12 +138,13 @@ def index_chunks(chunks: List[Chunk]):
     VectorStore.indexed_chunks = indexed_chunks
 
 
-def index_images(chunks: List[Chunk]):
+def index_chunk_images(chunks: List[Chunk]):
     """Embed images from image_context chunks and insert into the image FAISS index."""
     initialize()
-    image_index = VectorStore.image_index
-    image_meta = VectorStore.image_meta
-    indexed_images = VectorStore.indexed_images
+
+    image_index = VectorStore.doc_image_index
+    image_meta = VectorStore.doc_image_meta
+    indexed_images = VectorStore.indexed_doc_images
 
     paths, records = [], []
     for c in chunks:
@@ -148,6 +161,7 @@ def index_images(chunks: List[Chunk]):
                     "doc_id":      c.doc_id,
                     "chunk_index": c.chunk_index,
                     "section_path": c.section_path,
+                    "source": "document"
                 })
 
     if not paths:
@@ -164,8 +178,52 @@ def index_images(chunks: List[Chunk]):
         image_meta[base + i] = rec
         indexed_images.add((rec["doc_id"], rec["image_id"]))
 
-    VectorStore.image_meta = image_meta
+    VectorStore.doc_image_index = image_index
+    VectorStore.doc_image_meta = image_meta
+    VectorStore.indexed_doc_images = indexed_images
+
+def index_images(image_paths: List[str]):
+
+    initialize()
+
+    image_index = VectorStore.image_index
+    image_meta = VectorStore.image_meta
+    indexed_images = VectorStore.indexed_images
+
+    records = []
+
+    for path in image_paths:
+        p = Path(path)
+
+        image_id = get_image_id(p)
+        doc_id = "upload"
+
+        key = (doc_id, image_id)
+
+        if key in indexed_images:
+            continue
+
+        records.append({
+            "image_id": image_id,
+            "path": str(p),
+            "doc_id": doc_id,
+            "source": "upload"
+        })
+
+    vecs = embed_image(image_paths)
+
+    if image_index is None:
+        image_index = faiss.IndexFlatIP(vecs.shape[1])
+
+    base = image_index.ntotal
+    image_index.add(vecs)
+
+    for i, rec in enumerate(records):
+        image_meta[base + i] = rec
+        indexed_images.add((rec["doc_id"], rec["image_id"]))
+
     VectorStore.image_index = image_index
+    VectorStore.image_meta = image_meta
     VectorStore.indexed_images = indexed_images
 
 
