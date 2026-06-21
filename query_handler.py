@@ -19,51 +19,41 @@ from data_gathering import Data
 import json
 
 
-CURRENT_UPLOAD_SIGNALS = {
+AUDIO_TRANSCRIPT = None
+
+CURRENT_FILE_SIGNALS = {
 
     # English
     "this",
     "these",
     "attached",
     "uploaded",
-    "current",
-    "above",
 
     "this file",
     "this document",
     "this pdf",
-    "this image",
-    "this audio",
 
     # Persian
     "این",
     "این فایل",
     "این سند",
-    "این pdf",
     "این پی دی اف",
+    "این pdf",
 
     "فایل آپلود شده",
     "سند آپلود شده",
 
     "فایلی که آپلود کردم",
-    "فایلی که فرستادم",
-
-    "تصویر آپلود شده",
-    "عکس آپلود شده",
-
-    "صدای آپلود شده",
-    "فایل صوتی آپلود شده"
+    "فایلی که فرستادم"
 }
 
 
-ALL_UPLOAD_SIGNALS = {
+ALL_FILES_SIGNALS = {
 
     # English
-    "all uploaded",
+    "all uploaded files",
     "all files",
     "all documents",
-    "all images",
-    "all audios",
 
     "every file",
     "every document",
@@ -76,81 +66,41 @@ ALL_UPLOAD_SIGNALS = {
     "تمام فایل‌ها",
 
     "همه اسناد",
-    "تمام اسناد",
-
-    "همه تصاویر",
-    "تمام تصاویر",
-
-    "همه عکس ها",
-    "همه عکس‌ها",
-
-    "همه فایل های صوتی",
-    "تمام فایل های صوتی"
+    "تمام اسناد"
 }
 
 
-PREVIOUS_FILE_SIGNALS = {
+ORDINAL_SIGNALS = {
+    "first": 0,
+    "second": 1,
+    "third": 2,
+    "fourth": 3,
+    "fifth": 4,
 
-    # English
-    "previous file",
-    "previous document",
-    "earlier file",
-    "earlier document",
-
-    "uploaded before",
-    "previously uploaded",
-
-    "last uploaded",
-    "last document",
-
-    # Persian
-    "فایل قبلی",
-    "سند قبلی",
-
-    "گزارش قبلی",
-
-    "فایلی که قبلا آپلود کردم",
-    "فایلی که قبلاً آپلود کردم",
-
-    "سندی که قبلا فرستادم",
-    "سندی که قبلاً فرستادم",
-
-    "قبلی"
+    "اول": 0,
+    "دوم": 1,
+    "سوم": 2,
+    "چهارم": 3,
+    "پنجم": 4
 }
 
 
-MULTI_FILE_SIGNALS = {
+LAST_SIGNALS = {
+    "last",
+    "latest",
 
-    # English
-    "both",
-    "compare",
-    "comparison",
-    "versus",
-    "vs",
-
-    # Persian
-    "هر دو",
-    "مقایسه",
-    "در مقایسه با"
+    "آخر",
+    "آخری",
+    "آخرین"
 }
 
 
 @dataclass
-class ResolvedReferences:
+class ResolvedTargets:
 
-    current_upload_relevant: bool = False
+    documents: List[str] = field(default_factory=list)
 
-    previous_upload_relevant: bool = False
-
-    use_all_current_uploads: bool = False
-
-    current_documents: List[str] = field(default_factory=list)
-    current_images: List[str] = field(default_factory=list)
-    current_audio: List[str] = field(default_factory=list)
-
-    referenced_documents: List[str] = field(default_factory=list)
-    referenced_images: List[str] = field(default_factory=list)
-    referenced_audio: List[str] = field(default_factory=list)
+    images: List[str] = field(default_factory=list)
 
     confidence: float = 1.0
 
@@ -166,6 +116,42 @@ def normalize_name(name: str) -> str:
     return name.strip()
 
 
+
+def resolve_ordinals(query: str) -> list[str]:
+
+    q = query.lower()
+
+    active_docs = list(
+        ActiveContext.active_documents + ActiveContext.active_audio
+    )
+
+    matched = []
+
+    for signal, idx in ORDINAL_SIGNALS.items():
+
+        if signal in q:
+
+            if idx < len(active_docs):
+
+                matched.append(
+                    active_docs[idx]
+                )
+
+    if any(
+        signal in q
+        for signal in LAST_SIGNALS
+    ):
+
+        if active_docs:
+
+            matched.append(
+                active_docs[-1]
+            )
+
+    return list(set(matched))
+
+
+
 def extract_document_mentions(
     query: str,
     threshold: int = 85
@@ -177,9 +163,12 @@ def extract_document_mentions(
 
     for doc_id, meta in Data.docs.items():
 
-        title = normalize_name(meta.title)
+        title = normalize_name(
+            meta.title
+        )
 
         if title in q:
+
             matches.append(doc_id)
             continue
 
@@ -187,7 +176,6 @@ def extract_document_mentions(
             title,
             q
         )
-
         if score >= threshold:
             matches.append(doc_id)
 
@@ -207,203 +195,72 @@ def contains_signal(
     )
 
 
-def references_current_upload(
+def resolve_targets(
     query: str
-) -> bool:
+) -> ResolvedTargets:
 
-    return contains_signal(
-        query,
-        CURRENT_UPLOAD_SIGNALS
-    )
+    result = ResolvedTargets()
 
-
-def references_all_uploads(
-    query: str
-) -> bool:
-
-    return contains_signal(
-        query,
-        ALL_UPLOAD_SIGNALS
-    )
-
-
-def references_previous_uploads(
-    query: str
-) -> bool:
-
-    return contains_signal(
-        query,
-        PREVIOUS_FILE_SIGNALS
-    )
-
-
-def references_multiple_files(
-    query: str
-) -> bool:
-
-    return contains_signal(
-        query,
-        MULTI_FILE_SIGNALS
-    )
-
-
-def resolve_references(
-    query: str
-) -> ResolvedReferences:
-
-    result = ResolvedReferences()
-
-
-
-    current_docs = list(
-        ActiveContext.active_documents
-    )
-
-    current_images = list(
-        ActiveContext.active_images
-    )
-
-    current_audio = list(
-        ActiveContext.active_audio
-    )
-
-    has_current_uploads = (
-        len(current_docs) > 0
-        or len(current_images) > 0
-        or len(current_audio) > 0
-    )
-
-
-
-    current_signal = references_current_upload(
-        query
-    )
-
-    previous_signal = references_previous_uploads(
-        query
-    )
-
-    all_signal = references_all_uploads(
-        query
-    )
-
-    multi_signal = references_multiple_files(
-        query
-    )
+    q = query.lower()
 
 
     explicit_docs = extract_document_mentions(
         query
     )
 
+    if explicit_docs:
 
-    result.current_upload_relevant = (
-        has_current_uploads
-        and current_signal
+        result.documents.extend(
+            explicit_docs
+        )
+
+
+    if contains_signal(
+        q,
+        CURRENT_FILE_SIGNALS
+    ):
+
+        result.documents.extend(
+            ActiveContext.active_documents
+        )
+        result.documents.extend(ActiveContext.active_audio)
+
+        result.images.extend(
+            ActiveContext.active_images
+        )
+
+
+    if contains_signal(
+        q,
+        ALL_FILES_SIGNALS
+    ):
+
+        result.documents.extend(
+            Data.docs.keys()
+        )
+
+
+    result.documents = list(
+        set(result.documents)
     )
 
-    result.previous_upload_relevant = (
-        previous_signal
-        or len(explicit_docs) > 0
+    result.images = list(
+        set(result.images)
     )
 
-    result.use_all_current_uploads = (
-        has_current_uploads
-        and all_signal
-    )
-
-
-    if result.current_upload_relevant:
-
-        if result.use_all_current_uploads:
-
-            result.current_documents = current_docs
-            result.current_images = current_images
-            result.current_audio = current_audio
-
-        else:
-
-
-
-            if len(current_docs) == 1:
-                result.current_documents = current_docs
-
-            if len(current_images) == 1:
-                result.current_images = current_images
-
-            if len(current_audio) == 1:
-                result.current_audio = current_audio
-
-
-            elif len(current_docs) > 1:
-
-                current_doc_names = {
-                    normalize_name(x): x
-                    for x in current_docs
-                }
-
-                for doc_name in current_doc_names:
-
-                    if doc_name in query.lower():
-
-                        result.current_documents.append(
-                            current_doc_names[doc_name]
-                        )
-
-                #
-                # If none matched and query says
-                # "compare", "both", etc.
-                #
-
-                if (
-                    not result.current_documents
-                    and multi_signal
-                ):
-                    result.current_documents = current_docs
-
-    #
-    # Historical references
-    #
-
-    current_names = {
-        normalize_name(x)
-        for x in current_docs
-    }
-
-    for doc_id in explicit_docs:
-
-        meta = Data.docs[doc_id]
-
-        if (
-            normalize_name(meta.title)
-            not in current_names
-        ):
-            result.referenced_documents.append(
-                doc_id
-            )
-
-    #
-    # Confidence
-    #
 
     if (
-        not result.current_documents
-        and not result.referenced_documents
-        and not result.current_images
-        and not result.current_audio
+        not result.documents
+        and not result.images
     ):
+
         result.confidence = 0.3
 
-    elif (
-        result.referenced_documents
-        or result.current_documents
-    ):
+    else:
+
         result.confidence = 0.9
 
     return result
-
-
-
 
 
 def build_candidate_context():
@@ -416,7 +273,7 @@ def build_candidate_context():
             {
                 "doc_id": doc_id,
                 "title": meta.title,
-                "type": getattr(
+                "doc_type": getattr(
                     meta,
                     "doc_type",
                     "document"
@@ -429,20 +286,18 @@ def build_candidate_context():
 
 def llm_reference_resolver(
     query: str
-) -> ResolvedReferences:
+) -> ResolvedTargets:
 
     candidates = build_candidate_context()
 
     current_uploads = {
         "documents": list(
-            ActiveContext.active_documents
+            ActiveContext.active_documents +  ActiveContext.active_audio
         ),
         "images": list(
             ActiveContext.active_images
         ),
-        "audio": list(
-            ActiveContext.active_audio
-        )
+
     }
 
     system_prompt = """
@@ -450,33 +305,24 @@ You are a file reference resolver.
 
 Your task:
 
-1. Determine whether the user refers to:
-   - currently uploaded files
-   - previously uploaded files
-   - both
+Determine which files the user is referring to.
 
-2. Determine which files are being referenced.
+The user may refer to:
 
-3. Only use file names that exist
-   in the provided candidate list.
+- currently uploaded files
+- previously uploaded files
+- both
 
-4. Return valid JSON only.
+You may ONLY return files that exist in the provided candidate lists.
 
-Output schema:
+Return ONLY valid JSON.
+
+Schema:
 
 {
-  "current_upload_relevant": bool,
-  "use_all_current_uploads": bool,
-
-  "current_documents": [],
-  "current_images": [],
-  "current_audio": [],
-
-  "referenced_documents": [],
-  "referenced_images": [],
-  "referenced_audio": [],
-
-  "confidence": float
+  "documents": [],
+  "images": [],
+  "confidence": 0.0
 }
 """
 
@@ -489,6 +335,28 @@ Current Uploads:
 
 Available Files:
 {json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+Examples:
+
+Query:
+"Compare the first two documents"
+
+Output:
+{{
+  "documents": ["doc_a.pdf", "doc_b.pdf"],
+  "images": [],
+  "confidence": 0.95
+}}
+
+Query:
+"Summarize the transformer paper"
+
+Output:
+{{
+  "documents": ["transformer_survey.pdf"],
+  "images": [],
+  "confidence": 0.9
+}}
 
 Return JSON only.
 """
@@ -514,40 +382,60 @@ Return JSON only.
 
         parsed = json.loads(content)
 
-        return ResolvedReferences(
-            **parsed
+        return ResolvedTargets(
+            documents=parsed.get(
+                "documents",
+                []
+            ),
+            images=parsed.get(
+                "images",
+                []
+            ),
+
+            confidence=parsed.get(
+                "confidence",
+                0.0
+            )
         )
 
     except Exception:
 
-        return ResolvedReferences(
+        return ResolvedTargets(
             confidence=0.0
         )
 
-
 def resolve(request:UserRequest):
-    resolved = resolve_references(request.query)
+
+    query = request.query
+    resolved = resolve_targets(query)
+
 
     if (
             resolved.confidence < 0.6
-            or (
-            not resolved.current_documents
-            and not resolved.referenced_documents
-            and not resolved.current_images
-            and not resolved.referenced_images
-            and not resolved.current_audio
-            and not resolved.referenced_audio
-    )
+            and ActiveContext.active_documents
     ):
-        llm_result = llm_reference_resolver(
-            request.query
+
+        ordinal_docs = resolve_ordinals(
+            query
         )
 
-        if llm_result.confidence > resolved.confidence:
-            resolved = llm_result
+        if ordinal_docs:
+            resolved.documents.extend(
+                ordinal_docs
+            )
+
+            resolved.documents = list(
+                set(resolved.documents)
+            )
+
+            resolved.confidence = 0.95
+
+    if resolved.confidence < 0.6:
+        resolved = llm_reference_resolver(
+            query
+        )
 
     return resolved
-
 
 def send_images_to_vlm(image_paths: list[str],query: str):
     content = [
@@ -656,8 +544,8 @@ def index_to_faiss(chunks:List[Chunk]):
 
 def handle_image(intent, request, target_files):
     ##TODO image path are not necesaarily from request
-    image_paths = [image for image in target_files.current_images] if target_files.current_images else []
-    image_paths.append(image for image in target_files.referenced_images) if target_files.referenced_images else image_paths
+    image_paths = [image for image in target_files.images] if target_files.current_images else []
+
 
 
     match intent:
@@ -693,10 +581,22 @@ def explain_doc(chunks, meta, full_explanation = False, query = None):
 
 def handle_audio(intent, request ,target_files):
 
-    chunks = ActiveContext.active_files_chunks["audio"]["audio_chunks"]
-    transcripts  = ActiveContext.active_files_chunks["audio"]["transcripts"]
-    meta_audio = ActiveContext.active_files_chunks["audio"]["meta_audio"]
 
+    transcripts = AUDIO_TRANSCRIPT
+
+    related_chunks = []
+    meta_audio = []
+
+    for doc_id in target_files.documents:
+
+        related_chunks.extend(
+            Data.doc_to_chunks.get(doc_id, [])
+        )
+
+        if doc_id in Data.docs:
+            meta_audio.append(
+                Data.docs[doc_id]
+            )
     match intent:
 
         case Intent.AUDIO_TRANSCRIBE:
@@ -710,9 +610,9 @@ def handle_audio(intent, request ,target_files):
             # )
 
         case Intent.AUDIO_SUMMARIZE:
-            summary  = summarize_chunks(chunks=chunks,meta=meta_audio)
+            summary  = summarize_chunks(chunks=related_chunks,meta=meta_audio)
         case Intent.AUDIO_OVERVIEW:
-            overview = overview_func(chunks, meta_audio)
+            overview = overview_func(related_chunks, meta_audio)
         case _:
             return "\n".join(transcripts)
 
@@ -727,19 +627,12 @@ def document_actions():
 
 def handle_document(intent, request, target_files):
 
-    cur_docs_chunks = ActiveContext.active_files_chunks["document"]["doc_chunks"]
-    cur_docs_meta = ActiveContext.active_files_chunks["document"]["doc_meta"]
-    cur_docs_img_idx = ActiveContext.active_files_chunks["document"]["doc_img_idx"]
-    cur_docs_tbl_idx = ActiveContext.active_files_chunks["document"]["doc_tbl_idx"]
+
 
     related_chunks = []
     related_docs = []
-    related_files = (
-            target_files.current_documents +
-            target_files.referenced_documents
-    )
 
-    for doc_id in related_files:
+    for doc_id in target_files.documents:
 
 
         related_chunks.extend(
@@ -807,8 +700,8 @@ def handle_uploads(request:UserRequest):
 
         if ActiveContext.active_audio is not None and len(ActiveContext.active_audio) > 0:
 
-
-            for audio_path in ActiveContext.audio:
+            transcripts = []
+            for audio_path in ActiveContext.active_audio:
                 chunks, transcript, meta = process_audio(audio_path)
 
                 ingest(
@@ -818,7 +711,11 @@ def handle_uploads(request:UserRequest):
                     tbl_to_ch=None
                 )
 
+                transcripts.append(transcript)
+
                 index_to_faiss(chunks)
+
+            AUDIO_TRANSCRIPT = transcripts
 
     if ActiveContext.active_images is not None and len(ActiveContext.active_images) > 0:
             image_paths = [image_path for image_path in ActiveContext.active_images]
