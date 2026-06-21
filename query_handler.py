@@ -1,9 +1,9 @@
-from query_router import route_query, Intent
+from query_router import  Intent, handle_request, ActiveContext
 from data_gathering import UserRequest
 from LLM import HF_LLM, encode_image_to_base64
 from index_embedd import index_images, VectorStore, get_image_id, index_chunks, index_chunk_images
 from typing import List
-from retreival import retrieval_image, retrieval
+from retreival import retrieval
 from pathlib import Path
 from chunking_handlers.audio_hanlder import process_audio
 from chunking_handlers.non_digital_pdf_handler import process_scanned_pdf
@@ -13,6 +13,412 @@ from chunking_handlers.pp_handler import process_pptx
 from chunking_handlers.excel_handler import process_excel
 from data_gathering import ingest, Chunk
 import puremagic
+from rapidfuzz import fuzz
+from dataclasses import dataclass, field
+from data_gathering import Data
+
+
+CURRENT_UPLOAD_SIGNALS = {
+
+    # English
+    "this",
+    "these",
+    "attached",
+    "uploaded",
+    "current",
+    "above",
+
+    "this file",
+    "this document",
+    "this pdf",
+    "this image",
+    "this audio",
+
+    # Persian
+    "این",
+    "این فایل",
+    "این سند",
+    "این pdf",
+    "این پی دی اف",
+
+    "فایل آپلود شده",
+    "سند آپلود شده",
+
+    "فایلی که آپلود کردم",
+    "فایلی که فرستادم",
+
+    "تصویر آپلود شده",
+    "عکس آپلود شده",
+
+    "صدای آپلود شده",
+    "فایل صوتی آپلود شده"
+}
+
+
+ALL_UPLOAD_SIGNALS = {
+
+    # English
+    "all uploaded",
+    "all files",
+    "all documents",
+    "all images",
+    "all audios",
+
+    "every file",
+    "every document",
+
+    # Persian
+    "همه فایل ها",
+    "همه فایل‌ها",
+
+    "تمام فایل ها",
+    "تمام فایل‌ها",
+
+    "همه اسناد",
+    "تمام اسناد",
+
+    "همه تصاویر",
+    "تمام تصاویر",
+
+    "همه عکس ها",
+    "همه عکس‌ها",
+
+    "همه فایل های صوتی",
+    "تمام فایل های صوتی"
+}
+
+
+PREVIOUS_FILE_SIGNALS = {
+
+    # English
+    "previous file",
+    "previous document",
+    "earlier file",
+    "earlier document",
+
+    "uploaded before",
+    "previously uploaded",
+
+    "last uploaded",
+    "last document",
+
+    # Persian
+    "فایل قبلی",
+    "سند قبلی",
+
+    "گزارش قبلی",
+
+    "فایلی که قبلا آپلود کردم",
+    "فایلی که قبلاً آپلود کردم",
+
+    "سندی که قبلا فرستادم",
+    "سندی که قبلاً فرستادم",
+
+    "قبلی"
+}
+
+
+MULTI_FILE_SIGNALS = {
+
+    # English
+    "both",
+    "compare",
+    "comparison",
+    "versus",
+    "vs",
+
+    # Persian
+    "هر دو",
+    "مقایسه",
+    "در مقایسه با"
+}
+
+
+@dataclass
+class ResolvedReferences:
+
+    current_upload_relevant: bool = False
+
+    previous_upload_relevant: bool = False
+
+    use_all_current_uploads: bool = False
+
+    current_documents: List[str] = field(default_factory=list)
+    current_images: List[str] = field(default_factory=list)
+    current_audio: List[str] = field(default_factory=list)
+
+    referenced_documents: List[str] = field(default_factory=list)
+    referenced_images: List[str] = field(default_factory=list)
+    referenced_audio: List[str] = field(default_factory=list)
+
+    confidence: float = 1.0
+
+
+def normalize_name(name: str) -> str:
+
+    name = Path(name).name.lower()
+
+    if "." in name:
+        name = ".".join(name.split(".")[:-1])
+
+    return name.strip()
+
+def extract_document_mentions(
+    query: str,
+    threshold: int = 85
+) -> list[str]:
+
+    q = query.lower()
+
+    matches = []
+
+    for doc_id, meta in Data.docs.items():
+
+        title = normalize_name(meta.title)
+
+        if title in q:
+            matches.append(doc_id)
+            continue
+
+        score = fuzz.partial_ratio(
+            title,
+            q
+        )
+
+        if score >= threshold:
+            matches.append(doc_id)
+
+    return list(set(matches))
+
+
+def contains_signal(
+    query: str,
+    signals: set[str]
+) -> bool:
+
+    q = query.lower()
+
+    return any(
+        signal.lower() in q
+        for signal in signals
+    )
+
+
+def references_current_upload(
+    query: str
+) -> bool:
+
+    return contains_signal(
+        query,
+        CURRENT_UPLOAD_SIGNALS
+    )
+
+
+def references_all_uploads(
+    query: str
+) -> bool:
+
+    return contains_signal(
+        query,
+        ALL_UPLOAD_SIGNALS
+    )
+
+
+def references_previous_uploads(
+    query: str
+) -> bool:
+
+    return contains_signal(
+        query,
+        PREVIOUS_FILE_SIGNALS
+    )
+
+
+def references_multiple_files(
+    query: str
+) -> bool:
+
+    return contains_signal(
+        query,
+        MULTI_FILE_SIGNALS
+    )
+
+
+def resolve_references(
+    query: str
+) -> ResolvedReferences:
+
+    result = ResolvedReferences()
+
+    #
+    # Current uploads
+    #
+
+    current_docs = list(
+        ActiveContext.active_documents
+    )
+
+    current_images = list(
+        ActiveContext.active_images
+    )
+
+    current_audio = list(
+        ActiveContext.active_audio
+    )
+
+    has_current_uploads = (
+        len(current_docs) > 0
+        or len(current_images) > 0
+        or len(current_audio) > 0
+    )
+
+    #
+    # Signals
+    #
+
+    current_signal = references_current_upload(
+        query
+    )
+
+    previous_signal = references_previous_uploads(
+        query
+    )
+
+    all_signal = references_all_uploads(
+        query
+    )
+
+    multi_signal = references_multiple_files(
+        query
+    )
+
+    #
+    # Explicit document names
+    #
+
+    explicit_docs = extract_document_mentions(
+        query
+    )
+
+    #
+    # Current upload relevance
+    #
+
+    result.current_upload_relevant = (
+        has_current_uploads
+        and current_signal
+    )
+
+    result.previous_upload_relevant = (
+        previous_signal
+        or len(explicit_docs) > 0
+    )
+
+    result.use_all_current_uploads = (
+        has_current_uploads
+        and all_signal
+    )
+
+    #
+    # Current uploads selection
+    #
+
+    if result.current_upload_relevant:
+
+        if result.use_all_current_uploads:
+
+            result.current_documents = current_docs
+            result.current_images = current_images
+            result.current_audio = current_audio
+
+        else:
+
+            #
+            # If exactly one upload exists,
+            # select it automatically
+            #
+
+            if len(current_docs) == 1:
+                result.current_documents = current_docs
+
+            if len(current_images) == 1:
+                result.current_images = current_images
+
+            if len(current_audio) == 1:
+                result.current_audio = current_audio
+
+            #
+            # Multiple uploads:
+            # check whether user named some
+            #
+
+            elif len(current_docs) > 1:
+
+                current_doc_names = {
+                    normalize_name(x): x
+                    for x in current_docs
+                }
+
+                for doc_name in current_doc_names:
+
+                    if doc_name in query.lower():
+
+                        result.current_documents.append(
+                            current_doc_names[doc_name]
+                        )
+
+                #
+                # If none matched and query says
+                # "compare", "both", etc.
+                #
+
+                if (
+                    not result.current_documents
+                    and multi_signal
+                ):
+                    result.current_documents = current_docs
+
+    #
+    # Historical references
+    #
+
+    current_names = {
+        normalize_name(x)
+        for x in current_docs
+    }
+
+    for doc_id in explicit_docs:
+
+        meta = Data.docs[doc_id]
+
+        if (
+            normalize_name(meta.title)
+            not in current_names
+        ):
+            result.referenced_documents.append(
+                doc_id
+            )
+
+    #
+    # Confidence
+    #
+
+    if (
+        not result.current_documents
+        and not result.referenced_documents
+        and not result.current_images
+        and not result.current_audio
+    ):
+        result.confidence = 0.3
+
+    elif (
+        result.referenced_documents
+        or result.current_documents
+    ):
+        result.confidence = 0.9
+
+    return result
+
 
 def send_images_to_vlm(image_paths: list[str],query: str):
     content = [
@@ -120,8 +526,9 @@ def index_to_faiss(chunks:List[Chunk]):
 
 
 def handle_image(intent, request):
+    ##TODO image path are not necesaarily from request
     image_paths = [image_path for image_path in request.images]
-    ingest_image(image_paths)
+
 
     match intent:
         case Intent.IMAGE_SEARCH:
@@ -135,8 +542,11 @@ def handle_image(intent, request):
             response = send_images_to_vlm(image_paths, request)
             print(response)
 
-
-def summarize_chunks(chunks, meta_data):
+        case _:
+            raise ValueError(
+                f"Unhandled image intent: {intent}"
+            )
+def summarize_chunks(chunks, meta_data, Full_summary = True, query = None):
     pass
 
 
@@ -148,6 +558,8 @@ def overview_func(chunks, meta):
 
 def explain_doc(chunks, meta, full_explanation = False, query = None):
     pass
+
+
 
 def handle_audio(intent, request):
 
@@ -179,6 +591,10 @@ def handle_audio(intent, request):
 
         case Intent.AUDIO_QA:
             result = retrieval(query=request.query,k=10,is_doc=True)
+            # return answer_with_context(
+            #     query=request.query,
+            #     context=context
+            # )
 
         case Intent.AUDIO_SUMMARIZE:
             summary  = summarize_chunks(chunks=chunks,meta=meta_audio)
@@ -188,7 +604,11 @@ def handle_audio(intent, request):
             return "\n".join(transcripts)
 
 
-def handle_general(intent, request):
+def compare_documents():
+    pass
+
+
+def document_actions():
     pass
 
 
@@ -208,9 +628,15 @@ def handle_document(intent, request):
 
     match intent:
         case Intent.DOCUMENT_SUMMARIZE:
-            summary = summarize_chunks(docs_chunks, docs_meta)
+            summary = summarize_chunks(docs_chunks, docs_meta,Full_summary=True)
+        case Intent.DOCUMENT_SECTION_SUMMARIZE:
+            summary = summarize_chunks(docs_chunks, docs_meta, Full_summary=False, query= request.query)
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
             result = retrieval(query=request.query, k=10, is_doc=True)
+            # return answer_with_context(
+            #     query=request.query,
+            #     context=context
+            # )
         case Intent.DOCUMENT_OVERVIEW:
             overview = overview_func(docs_chunks, docs_meta)
         case Intent.DOCUMENT_FULL_EXPLAIN:
@@ -218,24 +644,129 @@ def handle_document(intent, request):
         case Intent.DOCUMENT_SECTION_EXPLAIN:
             explain_doc(docs_chunks, docs_meta, full_explanation=False, query= request.query)
         case Intent.COMPARE_DOCUMENTS:
-            pass
+            compare_documents()
         case Intent.DOCUMENT_ACTION:
-            pass
+            document_actions()
         case _:
             raise ValueError(
                 f"Unhandled intent: {intent}"
             )
 
-def handle_query(request:UserRequest):
-    intent = route_query(request)
+
+
+def handle_general(intent, request):
+    ##TODO change this to a better handler
+    response = HF_LLM.client.chat.completions.create(
+        model=HF_LLM.model_name,
+        messages=[
+            {
+                "role": "user",
+                "content": request.query
+            }
+        ]
+    )
+    return response.choices[0].message.content
+
+
+def handle_uploads(request:UserRequest):
+    if ActiveContext.has_file:
+        if ActiveContext.active_documents is not None and len(ActiveContext.active_documents) > 0:
+            docs_chunks, docs_meta, docs_img_idx, docs_tbl_idx = [], [], [], []
+
+            for doc_path in request.documents:
+                chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
+
+                docs_chunks.append(chunks)
+                docs_meta.append(meta)
+                docs_img_idx.append(img_idx)
+                docs_tbl_idx.append(tbl_idx)
+
+                ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
+                index_to_faiss(chunks)
+
+            ActiveContext.active_files_chunks["document"].append(docs_chunks)
+            ActiveContext.active_files_chunks["document"].append(docs_meta)
+            ActiveContext.active_files_chunks["document"].append(docs_img_idx)
+            ActiveContext.active_files_chunks["document"].append(docs_tbl_idx)
+
+        if ActiveContext.active_audio is not None and len(ActiveContext.active_audio) > 0:
+            audios_chunks = []
+            transcripts = []
+            meta_audio = []
+
+            for audio_path in ActiveContext.audio:
+                chunks, transcript, meta = process_audio(audio_path)
+
+                audios_chunks.extend(chunks)
+                transcripts.append(transcript)
+                meta_audio.append(meta)
+
+                ingest(
+                    chunks=chunks,
+                    doc_meta=meta,
+                    img_to_ch=None,
+                    tbl_to_ch=None
+                )
+
+                index_to_faiss(chunks)
+            ActiveContext.active_files_chunks["audio"].append(audios_chunks)
+            ActiveContext.active_files_chunks["audio"].append(transcripts)
+            ActiveContext.active_files_chunks["audio"].append(meta_audio)
+
+    if ActiveContext.active_images is not None and len(ActiveContext.active_images) > 0:
+            image_paths = [image_path for image_path in ActiveContext.active_images]
+            ingest_image(image_paths)
+
+
+def handle_query(request: UserRequest):
+
+    intent, ctx = handle_request(request)
+    handle_uploads(request)
 
     match intent:
-        case Intent.IMAGE_SEARCH | Intent.IMAGE_UNDERSTANDING:
-            handle_image(intent, request)
-        case Intent.AUDIO_QA | Intent.AUDIO_SUMMARIZE | Intent.AUDIO_TRANSCRIBE :
-            handle_audio(intent, request)
-        case Intent.GENERAL_CHAT | Intent.UNKNOWN:
-            handle_general(intent, request)
+
+        case (Intent.IMAGE_SEARCH | Intent.IMAGE_UNDERSTANDING):
+            return handle_image(intent, request)
+
+        case (Intent.AUDIO_QA| Intent.AUDIO_SUMMARIZE| Intent.AUDIO_TRANSCRIBE | Intent.AUDIO_OVERVIEW):
+            return handle_audio(intent, request)
+
+        case (
+            Intent.GENERAL_CHAT| Intent.UNKNOWN ):
+            return handle_general(intent, request)
+
         case _:
-            handle_document(intent, request)
-            
+            return handle_document(intent, request)
+
+
+
+
+# def answer_with_context(
+#     query: str,
+#     context: str
+# ):
+#
+#     response = HF_LLM.client.chat.completions.create(
+#         model=HF_LLM.model_name,
+#         temperature=0.2,
+#         messages=[
+#             {
+#                 "role": "system",
+#                 "content":
+#                 "Answer only from the provided context."
+#             },
+#             {
+#                 "role": "user",
+#                 "content":
+#                 f"""
+# Question:
+# {query}
+#
+# Context:
+# {context}
+# """
+#             }
+#         ]
+#     )
+#
+#     return response.choices[0].message.content

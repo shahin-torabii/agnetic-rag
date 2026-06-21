@@ -2,13 +2,22 @@ from enum import Enum
 from dataclasses import dataclass
 from data_gathering import UserRequest
 from LLM import HF_LLM
+from data_gathering import Data
+from index_embedd import VectorStore
+from typing import List, Set, Dict
+
 
 class Intent(str, Enum):
+
     GENERAL_CHAT = "GENERAL_CHAT"
 
     DOCUMENT_OVERVIEW = "DOCUMENT_OVERVIEW"
+
     DOCUMENT_QA = "DOCUMENT_QA"
+
     DOCUMENT_SECTION_EXPLAIN = "DOCUMENT_SECTION_EXPLAIN"
+    DOCUMENT_SECTION_SUMMARIZE = "DOCUMENT_SECTION_SUMMARIZE"
+
     DOCUMENT_FULL_EXPLAIN = "DOCUMENT_FULL_EXPLAIN"
     DOCUMENT_SUMMARIZE = "DOCUMENT_SUMMARIZE"
 
@@ -33,6 +42,7 @@ class Intent(str, Enum):
 
 @dataclass
 class QueryContext:
+
     has_document: bool = False
     has_image: bool = False
     has_audio: bool = False
@@ -40,6 +50,25 @@ class QueryContext:
     num_documents: int = 0
     num_images: int = 0
     num_audio: int = 0
+
+    has_stored_documents: bool = False
+    has_stored_images: bool = False
+    has_stored_audio: bool = False
+
+
+class ActiveContext:
+
+    has_file :bool = False
+
+    active_documents: Set[str] = set()
+
+    active_images: Set[str] = set()
+
+    active_audio: Set[str] = set()
+
+    active_files_chunks :Dict[str, List[List]] = {"document": [], "audio":[]}
+
+
 
 FA_EXPLAIN = [
     "توضیح",
@@ -69,11 +98,18 @@ FA_COMPARE = [
     "تفاوت",
 ]
 
+
 FA_SECTION = [
     "بخش",
     "فصل",
-    "chapter",
-    "section",
+    "قسمت",
+    "مقدمه",
+    "نتایج",
+    "نتیجه گیری",
+    "نتیجه‌گیری",
+    "روش",
+    "روش شناسی",
+    "روش‌شناسی",
 ]
 
 FA_ACTION = [
@@ -150,11 +186,15 @@ EN_COMPARE = [
 EN_SECTION = [
     "section",
     "chapter",
+    "part",
     "methodology",
     "results",
+    "discussion",
     "conclusion",
+    "introduction",
+    "background",
+    "related work",
 ]
-
 EN_ACTION = [
     "translate",
     "notes",
@@ -200,10 +240,28 @@ def contains_any(query: str, keywords: list[str]) -> bool:
 
 def classify_query(query: str, ctx: QueryContext) -> Intent:
 
+
     q = query.lower().strip()
 
-    if ctx.has_image and not ctx.has_document and not ctx.has_audio:
+    has_any_documents = (
+            ctx.has_document
+            or ctx.has_stored_documents
+    )
 
+    has_any_images = (
+            ctx.has_image
+            or ctx.has_stored_images
+    )
+
+    has_any_audio = (
+            ctx.has_audio
+            or ctx.has_stored_audio
+    )
+    if (
+            has_any_images
+            and not has_any_documents
+            and not has_any_audio
+    ):
         if (
                 contains_any(q, EN_SEARCH)
                 or contains_any(q, FA_SEARCH)
@@ -212,9 +270,13 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
 
         return Intent.IMAGE_UNDERSTANDING
 
-    if ctx.has_audio and not ctx.has_document and not ctx.has_image:
+    if (
+            has_any_audio
+            and not has_any_documents
+            and not has_any_images
+    ):
 
-        if (
+        if(
                 contains_any(q, EN_AUDIO_TRANSCRIBE)
                 or contains_any(q, FA_AUDIO_TRANSCRIBE)
         ):
@@ -234,8 +296,10 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
 
         return Intent.AUDIO_QA
 
-
-    if ctx.num_documents >= 2:
+    if (
+            ctx.num_documents >= 2
+            or len(Data.docs) >= 2
+    ):
 
         if (
             contains_any(q, EN_COMPARE)
@@ -243,19 +307,13 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
         ):
             return Intent.COMPARE_DOCUMENTS
 
-    if ctx.has_document:
+    if has_any_documents:
 
         if (
                 contains_any(q, EN_OVERVIEW)
                 or contains_any(q, FA_OVERVIEW)
         ):
             return Intent.DOCUMENT_OVERVIEW
-
-        if (
-                contains_any(q, EN_SUMMARIZE)
-                or contains_any(q, FA_SUMMARIZE)
-        ):
-            return Intent.DOCUMENT_SUMMARIZE
 
         if (
                 contains_any(q, EN_SEARCH)
@@ -279,11 +337,24 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
             ):
                 return Intent.DOCUMENT_SECTION_EXPLAIN
 
+            if (
+                    contains_any(q, EN_SUMMARIZE)
+                    or contains_any(q, FA_SUMMARIZE)
+            ):
+                return Intent.DOCUMENT_SECTION_SUMMARIZE
+
         if (
                 contains_any(q, EN_EXPLAIN)
                 or contains_any(q, FA_EXPLAIN)
         ):
             return Intent.DOCUMENT_FULL_EXPLAIN
+
+        if (
+                contains_any(q, EN_SUMMARIZE)
+                or contains_any(q, FA_SUMMARIZE)
+        ):
+            return Intent.DOCUMENT_SUMMARIZE
+
 
         return Intent.DOCUMENT_QA
 
@@ -303,6 +374,7 @@ Classify the request into EXACTLY ONE of the following classes:
 
 GENERAL_CHAT
 
+DOCUMENT_OVERVIEW
 DOCUMENT_QA
 DOCUMENT_SECTION_EXPLAIN
 DOCUMENT_FULL_EXPLAIN
@@ -311,9 +383,10 @@ DOCUMENT_SUMMARIZE
 IMAGE_UNDERSTANDING
 IMAGE_SEARCH
 
-  AUDIO_TRANSCRIBE
-    AUDIO_SUMMARIZE
-    AUDIO_QA
+AUDIO_OVERVIEW
+AUDIO_TRANSCRIBE
+AUDIO_SUMMARIZE
+AUDIO_QA
 
 SEARCH_DOCUMENT
 
@@ -335,14 +408,24 @@ Do not decide:
 - document size handling
 """
 
-    user_prompt = f"""
-Query: {query}
 
-Context:
-has_image: {ctx.has_image}
-has_document: {ctx.has_document}
-num_documents: {ctx.num_documents}
-"""
+    user_prompt = f"""
+    Query: {query}
+
+    Context:
+
+    has_image: {ctx.has_image}
+    has_document: {ctx.has_document}
+    has_audio: {ctx.has_audio}
+
+    has_stored_documents: {ctx.has_stored_documents}
+    has_stored_images: {ctx.has_stored_images}
+    has_stored_audio: {ctx.has_stored_audio}
+
+    num_documents: {ctx.num_documents}
+    num_images: {ctx.num_images}
+    num_audio: {ctx.num_audio}
+    """
 
     response = client.chat.completions.create(
         model=model_name,
@@ -395,6 +478,22 @@ def route_query(request: UserRequest):
 
         num_audio=len(request.audio)
         if request.audio else 0,
+
+        has_stored_documents=(
+                len(Data.docs) > 0
+        ),
+
+        has_stored_images=(
+                VectorStore.image_index is not None
+                and VectorStore.image_index.ntotal > 0
+        ),
+
+        has_stored_audio=(
+            any(
+                getattr(doc, "doc_type", None) == "audio"
+                for doc in Data.docs.values()
+            )
+        )
     )
 
     intent = classify_query(
@@ -407,5 +506,52 @@ def route_query(request: UserRequest):
             request.query,
             ctx
         )
+
+    return intent, ctx
+
+
+
+def manage_active_context(request:UserRequest):
+
+    ActiveContext.active_images = set()
+    ActiveContext.active_documents = set()
+    ActiveContext.active_audio = set()
+    ActiveContext.active_files_chunks = {"document": [], "audio":[]}
+    ActiveContext.has_file = False
+
+    has_docs = (
+            request.documents is not None
+            and len(request.documents) > 0
+    )
+
+    has_images = (
+            request.images is not None
+            and len(request.images) > 0
+    )
+
+    has_audio = (
+            request.audio is not None
+            and len(request.audio) > 0
+    )
+
+    if ( has_docs or has_images or has_audio ):
+        ActiveContext.has_file = True
+
+        if has_audio:
+            ActiveContext.active_audio.update(request.audio)
+
+        if has_images:
+            ActiveContext.active_images.update(request.images)
+
+        if has_docs:
+            ActiveContext.active_documents.update(request.documents)
+
+
+
+
+def handle_request(request: UserRequest):
+
+    intent , ctx = route_query(request)
+    manage_active_context(request)
 
     return intent, ctx
