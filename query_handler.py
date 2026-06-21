@@ -16,6 +16,7 @@ import puremagic
 from rapidfuzz import fuzz
 from dataclasses import dataclass, field
 from data_gathering import Data
+import json
 
 
 CURRENT_UPLOAD_SIGNALS = {
@@ -418,6 +419,152 @@ def resolve_references(
         result.confidence = 0.9
 
     return result
+
+
+
+
+
+def build_candidate_context():
+
+    docs = []
+
+    for doc_id, meta in Data.docs.items():
+
+        docs.append(
+            {
+                "doc_id": doc_id,
+                "title": meta.title,
+                "type": getattr(
+                    meta,
+                    "doc_type",
+                    "document"
+                )
+            }
+        )
+
+    return docs
+
+
+def llm_reference_resolver(
+    query: str
+) -> ResolvedReferences:
+
+    candidates = build_candidate_context()
+
+    current_uploads = {
+        "documents": list(
+            ActiveContext.active_documents
+        ),
+        "images": list(
+            ActiveContext.active_images
+        ),
+        "audio": list(
+            ActiveContext.active_audio
+        )
+    }
+
+    system_prompt = """
+You are a file reference resolver.
+
+Your task:
+
+1. Determine whether the user refers to:
+   - currently uploaded files
+   - previously uploaded files
+   - both
+
+2. Determine which files are being referenced.
+
+3. Only use file names that exist
+   in the provided candidate list.
+
+4. Return valid JSON only.
+
+Output schema:
+
+{
+  "current_upload_relevant": bool,
+  "use_all_current_uploads": bool,
+
+  "current_documents": [],
+  "current_images": [],
+  "current_audio": [],
+
+  "referenced_documents": [],
+  "referenced_images": [],
+  "referenced_audio": [],
+
+  "confidence": float
+}
+"""
+
+    user_prompt = f"""
+User Query:
+{query}
+
+Current Uploads:
+{json.dumps(current_uploads, ensure_ascii=False, indent=2)}
+
+Available Files:
+{json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+Return JSON only.
+"""
+
+    response = HF_LLM.client.chat.completions.create(
+        model=HF_LLM.model_name,
+        temperature=0,
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": user_prompt
+            }
+        ]
+    )
+
+    content = response.choices[0].message.content
+
+    try:
+
+        parsed = json.loads(content)
+
+        return ResolvedReferences(
+            **parsed
+        )
+
+    except Exception:
+
+        return ResolvedReferences(
+            confidence=0.0
+        )
+
+
+def resolve(request:UserRequest):
+    resolved = resolve_references(request.query)
+
+    if (
+            resolved.confidence < 0.6
+            or (
+            not resolved.current_documents
+            and not resolved.referenced_documents
+            and not resolved.current_images
+            and not resolved.referenced_images
+            and not resolved.current_audio
+            and not resolved.referenced_audio
+    )
+    ):
+        llm_result = llm_reference_resolver(
+            request.query
+        )
+
+        if llm_result.confidence > resolved.confidence:
+            resolved = llm_result
+
+
 
 
 def send_images_to_vlm(image_paths: list[str],query: str):
