@@ -1,5 +1,5 @@
 from query_router import  Intent, handle_request, ActiveContext
-from data_gathering import UserRequest
+from data_gathering import UserRequest, BaseMeta
 from LLM import HF_LLM, encode_image_to_base64
 from index_embedd import index_images, VectorStore, get_image_id, index_chunks, index_chunk_images
 from typing import List
@@ -17,6 +17,7 @@ from rapidfuzz import fuzz
 from dataclasses import dataclass, field
 from data_gathering import Data
 import json
+from collections import defaultdict
 
 
 AUDIO_TRANSCRIPT = None
@@ -437,11 +438,13 @@ def resolve(request:UserRequest):
 
     return resolved
 
-def send_images_to_vlm(image_paths: list[str],query: str):
+def send_images_to_vlm(image_paths: list[str],query: str, context:str = ""):
     content = [
         {
             "type": "text",
-            "text": query
+            "text": query,
+            "cotext":context
+
         }
     ]
 
@@ -564,10 +567,150 @@ def handle_image(intent, request, target_files):
             raise ValueError(
                 f"Unhandled image intent: {intent}"
             )
-def summarize_chunks(chunks, meta_data, Full_summary = True, query = None):
-    pass
+
+def llm_summarizer(batch, mode="partial", query=None):
+
+    image_descriptions = []
+    text_chunks = []
+    if mode in ["partial", "section"]:
+
+        for chunk in batch:
+
+            if chunk.chunk_type == "image_context":
+
+                images = list(chunk.image_refs.values())
+                context = chunk.text
+
+                img_query = f"""
+    Explain these images using context:
+    {context}
+    """
+
+                desc = send_images_to_vlm(images, img_query)
+                image_descriptions.append(desc)
+
+            else:
+                text_chunks.append(chunk.text)
+
+        combined_text = "\n".join(text_chunks + image_descriptions)
+
+        if query:
+            combined_text = f"Query: {query}\n\n{combined_text}"
+
+        system_prompt = """
+    You are a focused summarization assistant.
+    Summarize ONLY the provided content.
+    Be concise and query-aware.
+    """
+
+    elif mode == "full":
+
+        for chunk in batch:
+
+            if chunk.chunk_type == "image_context":
+
+                images = list(chunk.image_refs.values())
+                context = chunk.text
+
+                img_query = f"""
+    Explain these images using context:
+    {context}
+    """
+
+                desc = send_images_to_vlm(images, img_query)
+                image_descriptions.append(desc)
+
+            else:
+                text_chunks.append(chunk.text)
+
+        combined_text = "\n".join(text_chunks + image_descriptions)
+
+        system_prompt = """
+    You are a document-level summarizer.
+    Summarize the entire document comprehensively.
+    """
+
+    elif mode == "final":
 
 
+        combined_text = "\n".join(batch)
+
+        system_prompt = """
+    You are an expert summarizer.
+    You are given partial summaries of a document.
+
+    Your task:
+    - merge them
+    - remove redundancy
+    - produce a coherent final summary
+    """
+
+    response = HF_LLM.client.chat.completions.create(
+        model=HF_LLM.model_name,
+        temperature=0,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": combined_text}
+        ]
+    )
+
+    return response.choices[0].message.content
+
+
+
+def select_summary_chunks(chunks, query: str =  None):
+
+
+    if query is None:
+        return chunks
+
+    q = query.lower()
+
+    strict = []
+    fuzzy = []
+
+    for c in chunks:
+
+        if not c.section_path:
+            continue
+
+        joined = " ".join(c.section_path).lower()
+
+
+        if any(q == s.lower() for s in c.section_path):
+            strict.append(c)
+
+        elif q in joined or joined in q:
+            fuzzy.append(c)
+
+    if strict:
+        return strict
+
+
+    if fuzzy:
+        return fuzzy
+
+
+    return retrieval(query, k=15, is_doc=True)
+
+
+def summarize_chunks(chunks: List[Chunk], meta_data: BaseMeta , full_summary: bool = True, query: str = None):
+    if full_summary:
+
+        selected_chunks = sorted(chunks, key=lambda x: (x.doc_id, x.chunk_index))
+    else:
+        selected_chunks = select_summary_chunks(chunks, query)
+
+    summaries = []
+
+    for i in range(0, len(selected_chunks), 5):
+        batch = selected_chunks[i:i + 5]
+
+        summaries.append(
+            llm_summarizer(batch, mode="partial", query=query)
+        )
+
+    return llm_summarizer(summaries, mode="final")
 
 
 def overview_func(chunks, meta):

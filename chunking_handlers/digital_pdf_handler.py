@@ -10,6 +10,7 @@ import numpy as np
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from data_gathering import _token_count, Chunk, IMAGE_DIR, BaseMeta, DocType, DOC_TYPE_SIGNALS, DOC_TYPE_PROFILES
 
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
