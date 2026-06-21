@@ -155,6 +155,7 @@ class ResolvedReferences:
     confidence: float = 1.0
 
 
+
 def normalize_name(name: str) -> str:
 
     name = Path(name).name.lower()
@@ -163,6 +164,7 @@ def normalize_name(name: str) -> str:
         name = ".".join(name.split(".")[:-1])
 
     return name.strip()
+
 
 def extract_document_mentions(
     query: str,
@@ -251,9 +253,7 @@ def resolve_references(
 
     result = ResolvedReferences()
 
-    #
-    # Current uploads
-    #
+
 
     current_docs = list(
         ActiveContext.active_documents
@@ -273,9 +273,7 @@ def resolve_references(
         or len(current_audio) > 0
     )
 
-    #
-    # Signals
-    #
+
 
     current_signal = references_current_upload(
         query
@@ -293,17 +291,11 @@ def resolve_references(
         query
     )
 
-    #
-    # Explicit document names
-    #
 
     explicit_docs = extract_document_mentions(
         query
     )
 
-    #
-    # Current upload relevance
-    #
 
     result.current_upload_relevant = (
         has_current_uploads
@@ -320,9 +312,6 @@ def resolve_references(
         and all_signal
     )
 
-    #
-    # Current uploads selection
-    #
 
     if result.current_upload_relevant:
 
@@ -334,10 +323,7 @@ def resolve_references(
 
         else:
 
-            #
-            # If exactly one upload exists,
-            # select it automatically
-            #
+
 
             if len(current_docs) == 1:
                 result.current_documents = current_docs
@@ -348,10 +334,6 @@ def resolve_references(
             if len(current_audio) == 1:
                 result.current_audio = current_audio
 
-            #
-            # Multiple uploads:
-            # check whether user named some
-            #
 
             elif len(current_docs) > 1:
 
@@ -564,7 +546,7 @@ def resolve(request:UserRequest):
         if llm_result.confidence > resolved.confidence:
             resolved = llm_result
 
-
+    return resolved
 
 
 def send_images_to_vlm(image_paths: list[str],query: str):
@@ -672,9 +654,10 @@ def index_to_faiss(chunks:List[Chunk]):
     index_chunk_images(chunks)
 
 
-def handle_image(intent, request):
+def handle_image(intent, request, target_files):
     ##TODO image path are not necesaarily from request
-    image_paths = [image_path for image_path in request.images]
+    image_paths = [image for image in target_files.current_images] if target_files.current_images else []
+    image_paths.append(image for image in target_files.referenced_images) if target_files.referenced_images else image_paths
 
 
     match intent:
@@ -708,28 +691,11 @@ def explain_doc(chunks, meta, full_explanation = False, query = None):
 
 
 
-def handle_audio(intent, request):
+def handle_audio(intent, request ,target_files):
 
-    audios_chunks = []
-    transcripts = []
-    meta_audio = []
-
-    for audio_path in request.audio:
-
-        chunks, transcript, meta = process_audio(audio_path)
-
-        audios_chunks.extend(chunks)
-        transcripts.append(transcript)
-        meta_audio.append(meta)
-
-        ingest(
-            chunks=chunks,
-            doc_meta=meta,
-            img_to_ch=None,
-            tbl_to_ch=None
-        )
-
-        index_to_faiss(chunks)
+    chunks = ActiveContext.active_files_chunks["audio"]["audio_chunks"]
+    transcripts  = ActiveContext.active_files_chunks["audio"]["transcripts"]
+    meta_audio = ActiveContext.active_files_chunks["audio"]["meta_audio"]
 
     match intent:
 
@@ -759,25 +725,38 @@ def document_actions():
     pass
 
 
-def handle_document(intent, request):
-    docs_chunks, docs_meta, docs_img_idx, docs_tbl_idx =  [], [], [], []
+def handle_document(intent, request, target_files):
 
-    for doc_path in request.documents:
-        chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
+    cur_docs_chunks = ActiveContext.active_files_chunks["document"]["doc_chunks"]
+    cur_docs_meta = ActiveContext.active_files_chunks["document"]["doc_meta"]
+    cur_docs_img_idx = ActiveContext.active_files_chunks["document"]["doc_img_idx"]
+    cur_docs_tbl_idx = ActiveContext.active_files_chunks["document"]["doc_tbl_idx"]
 
-        docs_chunks.append(chunks)
-        docs_meta.append(meta)
-        docs_img_idx.append(img_idx)
-        docs_tbl_idx.append(tbl_idx)
+    related_chunks = []
+    related_docs = []
+    related_files = (
+            target_files.current_documents +
+            target_files.referenced_documents
+    )
 
-        ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
-        index_to_faiss(chunks)
+    for doc_id in related_files:
+
+
+        related_chunks.extend(
+            Data.doc_to_chunks.get(doc_id, [])
+        )
+
+
+        if doc_id in Data.docs:
+            related_docs.append(
+                Data.docs[doc_id]
+            )
 
     match intent:
         case Intent.DOCUMENT_SUMMARIZE:
-            summary = summarize_chunks(docs_chunks, docs_meta,Full_summary=True)
+            summary = summarize_chunks(related_chunks, related_docs,Full_summary=True)
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
-            summary = summarize_chunks(docs_chunks, docs_meta, Full_summary=False, query= request.query)
+            summary = summarize_chunks(related_chunks, related_docs, Full_summary=False, query= request.query)
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
             result = retrieval(query=request.query, k=10, is_doc=True)
             # return answer_with_context(
@@ -785,11 +764,11 @@ def handle_document(intent, request):
             #     context=context
             # )
         case Intent.DOCUMENT_OVERVIEW:
-            overview = overview_func(docs_chunks, docs_meta)
+            overview = overview_func(related_chunks, related_docs)
         case Intent.DOCUMENT_FULL_EXPLAIN:
-            explain_doc(docs_chunks, docs_meta, full_explanation=True)
+            explain_doc(related_chunks, related_docs, full_explanation=True)
         case Intent.DOCUMENT_SECTION_EXPLAIN:
-            explain_doc(docs_chunks, docs_meta, full_explanation=False, query= request.query)
+            explain_doc(related_chunks, related_docs, full_explanation=False, query= request.query)
         case Intent.COMPARE_DOCUMENTS:
             compare_documents()
         case Intent.DOCUMENT_ACTION:
@@ -818,35 +797,19 @@ def handle_general(intent, request):
 def handle_uploads(request:UserRequest):
     if ActiveContext.has_file:
         if ActiveContext.active_documents is not None and len(ActiveContext.active_documents) > 0:
-            docs_chunks, docs_meta, docs_img_idx, docs_tbl_idx = [], [], [], []
 
             for doc_path in request.documents:
                 chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
 
-                docs_chunks.append(chunks)
-                docs_meta.append(meta)
-                docs_img_idx.append(img_idx)
-                docs_tbl_idx.append(tbl_idx)
 
                 ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
                 index_to_faiss(chunks)
 
-            ActiveContext.active_files_chunks["document"].append(docs_chunks)
-            ActiveContext.active_files_chunks["document"].append(docs_meta)
-            ActiveContext.active_files_chunks["document"].append(docs_img_idx)
-            ActiveContext.active_files_chunks["document"].append(docs_tbl_idx)
-
         if ActiveContext.active_audio is not None and len(ActiveContext.active_audio) > 0:
-            audios_chunks = []
-            transcripts = []
-            meta_audio = []
+
 
             for audio_path in ActiveContext.audio:
                 chunks, transcript, meta = process_audio(audio_path)
-
-                audios_chunks.extend(chunks)
-                transcripts.append(transcript)
-                meta_audio.append(meta)
 
                 ingest(
                     chunks=chunks,
@@ -856,9 +819,6 @@ def handle_uploads(request:UserRequest):
                 )
 
                 index_to_faiss(chunks)
-            ActiveContext.active_files_chunks["audio"].append(audios_chunks)
-            ActiveContext.active_files_chunks["audio"].append(transcripts)
-            ActiveContext.active_files_chunks["audio"].append(meta_audio)
 
     if ActiveContext.active_images is not None and len(ActiveContext.active_images) > 0:
             image_paths = [image_path for image_path in ActiveContext.active_images]
@@ -869,21 +829,22 @@ def handle_query(request: UserRequest):
 
     intent, ctx = handle_request(request)
     handle_uploads(request)
+    target_files = resolve(request)
 
     match intent:
 
         case (Intent.IMAGE_SEARCH | Intent.IMAGE_UNDERSTANDING):
-            return handle_image(intent, request)
+            return handle_image(intent, request, target_files)
 
         case (Intent.AUDIO_QA| Intent.AUDIO_SUMMARIZE| Intent.AUDIO_TRANSCRIBE | Intent.AUDIO_OVERVIEW):
-            return handle_audio(intent, request)
+            return handle_audio(intent, request, target_files)
 
         case (
             Intent.GENERAL_CHAT| Intent.UNKNOWN ):
-            return handle_general(intent, request)
+            return handle_general(intent, request, target_files)
 
         case _:
-            return handle_document(intent, request)
+            return handle_document(intent, request, target_files)
 
 
 

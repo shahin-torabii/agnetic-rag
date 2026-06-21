@@ -66,7 +66,7 @@ class ActiveContext:
 
     active_audio: Set[str] = set()
 
-    active_files_chunks :Dict[str, List[List]] = {"document": [], "audio":[]}
+    active_files_chunks :Dict[str, dict] = {"document": {}, "audio":{}}
 
 
 
@@ -516,7 +516,6 @@ def manage_active_context(request:UserRequest):
     ActiveContext.active_images = set()
     ActiveContext.active_documents = set()
     ActiveContext.active_audio = set()
-    ActiveContext.active_files_chunks = {"document": [], "audio":[]}
     ActiveContext.has_file = False
 
     has_docs = (

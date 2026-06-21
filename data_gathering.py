@@ -48,6 +48,8 @@ class Data:
 
     chunk_keys = set()
 
+    doc_to_chunks: Dict[str, List[Chunk]] = {}
+
     image_to_chunks: Dict[MediaKey, Set[ChunkKey]] = {}
 
 
@@ -193,6 +195,11 @@ def ingest(
 
             Data.chunk_by_key[chunk_key] = chunk
             Data.chunk_keys.add(chunk_key)
+
+            Data.doc_to_chunks.setdefault(
+                chunk.doc_id,
+                []
+            ).append(chunk)
 
     if img_to_ch is not None:
         for image_key, chunk_keys in img_to_ch.items():
