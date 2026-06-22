@@ -44,8 +44,37 @@ def send_images_to_vlm(image_paths: list[str],query: str, context:str = ""):
     return response.choices[0].message.content
 
 
+def select_related_chunks(chunks, query: str =  None):
 
 
+    if query is None:
+        return chunks
+
+    q = query.lower()
+
+    strict = []
+    fuzzy = []
+
+    for c in chunks:
+
+        if not c.section_path:
+            continue
+
+        joined = " ".join(c.section_path).lower()
+
+        if any(q == s.lower() for s in c.section_path):
+            strict.append(c)
+
+        elif q in joined or joined in q:
+            fuzzy.append(c)
+
+    if strict:
+        return strict
+
+    if fuzzy:
+        return fuzzy
+
+    return retrieval(query, k=15, is_doc=True)
 
 
 def compare_documents():
@@ -145,49 +174,12 @@ def llm_summarizer(batch, mode="partial", query=None):
     return response.choices[0].message.content
 
 
-
-def select_summary_chunks(chunks, query: str =  None):
-
-
-    if query is None:
-        return chunks
-
-    q = query.lower()
-
-    strict = []
-    fuzzy = []
-
-    for c in chunks:
-
-        if not c.section_path:
-            continue
-
-        joined = " ".join(c.section_path).lower()
-
-
-        if any(q == s.lower() for s in c.section_path):
-            strict.append(c)
-
-        elif q in joined or joined in q:
-            fuzzy.append(c)
-
-    if strict:
-        return strict
-
-
-    if fuzzy:
-        return fuzzy
-
-
-    return retrieval(query, k=15, is_doc=True)
-
-
 def summarize_chunks(chunks: List[Chunk], meta_data: List[BaseMeta] , full_summary: bool = True, query: str = None):
-    if full_summary:
 
+    if full_summary:
         selected_chunks = sorted(chunks, key=lambda x: (x.doc_id, x.chunk_index))
     else:
-        selected_chunks = select_summary_chunks(chunks, query)
+        selected_chunks = select_related_chunks(chunks, query)
 
     summaries = []
 
@@ -340,5 +332,145 @@ def overview_func(
 
     return final_overview
 
-def explain_doc(chunks, meta, full_explanation = False, query = None):
-    pass
+
+def llm_explainer(batch, mode="partial", meta=None, query=None ):
+
+    if mode == "partial":
+
+        image_descriptions = []
+        text_chunks = []
+
+        for chunk in batch:
+
+            if chunk.chunk_type == "image_context":
+
+                images = list(chunk.image_refs.values())
+
+                context = chunk.text
+
+                image_description = send_images_to_vlm(
+                    image_paths=images,
+                    query=(
+                        "Explain the provided images using the provided context."
+                    ),
+                    context=context
+                )
+
+                image_descriptions.append(image_description)
+
+            else:
+                text_chunks.append(chunk.text)
+
+        combined_text = "\n".join(
+            text_chunks + image_descriptions)
+
+        if query:
+
+            system_prompt = f"""
+You are a teaching assistant.
+
+Explain ONLY the content relevant to:
+
+{query}
+
+Your explanation should:
+
+- be educational
+- preserve important details
+- explain concepts clearly
+- avoid summarizing
+"""
+        else:
+
+            system_prompt = """
+You are a teaching assistant.
+
+Explain the provided content.
+
+Your explanation should:
+
+- teach the concepts
+- preserve important details
+- explain terminology
+- explain relationships
+- avoid merely summarizing
+"""
+
+    elif mode == "final":
+
+        combined_text = "\n".join(batch)
+
+        meta_context = ""
+
+        if meta is not None:
+
+            meta_context = f"""
+Document Title: {meta.title}
+Document Type: {meta.doc_type}
+Source Type: {meta.source_type}
+"""
+
+        system_prompt = f"""
+You are a teaching assistant.
+
+{meta_context}
+
+You are given multiple explanations
+from different parts of the same document.
+
+Create ONE coherent explanation.
+
+Requirements:
+
+- organize logically
+- remove redundancy
+- preserve technical details
+- make the explanation educational
+- connect concepts across sections
+"""
+
+    else:
+        raise ValueError(
+            f"Unsupported mode: {mode}"
+        )
+
+    response = HF_LLM.client.chat.completions.create(
+        model=HF_LLM.model_name,
+        temperature=0,
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": combined_text
+            }
+        ]
+    )
+
+    return response.choices[0].message.content
+
+
+def explain_doc(chunks, meta, full_explanation=False, query=None, batch_size=5):
+
+
+    if full_explanation:
+        selected_chunks = sorted(chunks, key=lambda x: (x.doc_id, x.chunk_index))
+    else:
+        selected_chunks = select_related_chunks(chunks, query)
+
+    partial_explanations = []
+
+    for start_idx in range(0, len(selected_chunks), batch_size):
+
+        batch = selected_chunks[start_idx: start_idx + batch_size]
+
+        explanation = llm_explainer(batch=batch, mode="partial", query=query)
+
+        partial_explanations.append(explanation)
+
+    final_explanation = llm_explainer(batch=partial_explanations,mode="final",meta=meta,query=query
+    )
+
+    return final_explanation
