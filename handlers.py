@@ -151,6 +151,7 @@ def compare_documents(target_files):
     comparison =  response.choices[0].message.content
     return comparison
 
+
 def document_actions():
     pass
 
@@ -371,19 +372,11 @@ Create a coherent high-level overview.
     return response.choices[0].message.content
 
 
-def overview_func(
-    chunks,
-    meta,
-    batch_size: int = 5
-):
+def overview_func(chunks, meta, batch_size: int = 5 ):
 
     partial_overviews = []
 
-    for start_idx in range(
-        0,
-        len(chunks),
-        batch_size
-    ):
+    for start_idx in range(0, len(chunks), batch_size):
 
         batch = chunks[
             start_idx:

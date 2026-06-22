@@ -122,19 +122,17 @@ def handle_audio(intent, request, target_files):
     match intent:
 
         case Intent.AUDIO_TRANSCRIBE:
-            return "\n".join(transcripts)
+            audio_transcript =  "\n".join(transcripts)
 
         case Intent.AUDIO_QA:
             result = retrieval(query=request.query, k=10, is_doc=True)
-            # return answer_with_context(
-            #     query=request.query,
-            #     context=context
-            # )
 
         case Intent.AUDIO_SUMMARIZE:
             summary = summarize_chunks(related_chunks, meta_audio, full_summary=True)
+
         case Intent.AUDIO_OVERVIEW:
             overview = overview_func(related_chunks, meta_audio)
+
         case _:
             return "\n".join(transcripts)
 
