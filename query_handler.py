@@ -30,10 +30,13 @@ def detect_file_type(file_path):
 
 def get_doc_chunks(file_path):
     mime, suffix, path = detect_file_type(file_path)
+
     if mime == "application/pdf":
+        print("digital pdf")
         #pdf
         chunks, meta, img_idx, tbl_idx = process_pdf(file_path)
         if chunks == []:
+            print("scanned pdf")
             return process_scanned_pdf(file_path)
 
         return chunks, meta, img_idx, tbl_idx
@@ -138,38 +141,48 @@ def handle_audio(intent, request, target_files):
 
 
 def handle_document(intent, request, target_files):
-    related_chunks = []
-    related_docs = []
+    related_chunks = {}
+    related_docs = {}
 
     for doc_id in target_files.documents:
-
-        related_chunks.extend(
-            Data.doc_to_chunks.get(doc_id, [])
-        )
+        related_chunks[doc_id] = (Data.doc_to_chunks.get(doc_id, []))
 
         if doc_id in Data.docs:
-            related_docs.append(
-                Data.docs[doc_id]
-            )
+            related_docs[doc_id] = (Data.docs[doc_id])
 
     match intent:
         case Intent.DOCUMENT_SUMMARIZE:
-            summary = summarize_chunks(related_chunks, related_docs, full_summary=True)
-
+            summaries = []
+            for doc_id in target_files.documents:
+                summary = summarize_chunks(related_chunks[doc_id], related_docs[doc_id], full_summary=True)
+                summaries.append(summary)
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
-            summary = summarize_chunks(related_chunks, related_docs, Full_summary=False, query=request.query)
+            summaries = []
+            for doc_id in target_files.documents:
+                summary = summarize_chunks(related_chunks[doc_id], related_docs[doc_id], full_summary=False, query=request.query)
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
             result = retrieval(query=request.query, k=10, is_doc=True)
 
         case Intent.DOCUMENT_OVERVIEW:
-            overview = overview_func(related_chunks, related_docs)
+            over_views = []
+            for doc_id in target_files.documents:
+                overview = overview_func(related_chunks[doc_id], related_docs[doc_id])
+                over_views.append(overview)
 
         case Intent.DOCUMENT_FULL_EXPLAIN:
-            explain_doc(related_chunks, related_docs, full_explanation=True)
+            explanations = []
+            for doc_id in target_files.documents:
+                explanation = explain_doc(related_chunks[doc_id], related_docs[doc_id], full_explanation=True)
+                explanations.append(explanation)
+            print("\n\n".join(explanations))
 
         case Intent.DOCUMENT_SECTION_EXPLAIN:
-            explain_doc(related_chunks, related_docs, full_explanation=False, query=request.query)
+            explanations = []
+            for doc_id in target_files.documents:
+                explanation = explain_doc(related_chunks[doc_id], related_docs[doc_id], full_explanation=False, query=request.query)
+                explanations.append(explanation)
+            print("\n\n".join(explanations))
 
         case Intent.COMPARE_DOCUMENTS:
             compare_documents(target_files.documents)
@@ -235,6 +248,9 @@ def handle_query(request: UserRequest):
     intent, ctx = handle_request(request)
     handle_uploads(request)
     target_files = resolve(request)
+
+    print("intent:",intent)
+    print("docs:", target_files)
 
     match intent:
 

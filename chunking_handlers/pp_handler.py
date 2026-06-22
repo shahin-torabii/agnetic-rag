@@ -16,7 +16,7 @@ import numpy as np
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from word_handler import DocType, DOC_TYPE_SIGNALS, _token_count, Chunk, IMAGE_DIR
+from data_gathering import DocType, DOC_TYPE_SIGNALS, _token_count, Chunk, IMAGE_DIR
 
 IMAGE_DIR = "../images"
 

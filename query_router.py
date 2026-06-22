@@ -5,6 +5,7 @@ from LLM import HF_LLM
 from data_gathering import Data
 from index_embedd import VectorStore
 from typing import List, Set, Dict
+from pathlib import Path
 
 
 class Intent(str, Enum):
@@ -537,13 +538,16 @@ def manage_active_context(request:UserRequest):
         ActiveContext.has_file = True
 
         if has_audio:
-            ActiveContext.active_audio.update(request.audio)
+            audios = [Path(audio).name for audio in request.audio]
+            ActiveContext.active_audio.update(audios)
 
         if has_images:
-            ActiveContext.active_images.update(request.images)
+            ims = [Path(image).name for image in request.images]
+            ActiveContext.active_images.update(ims)
 
         if has_docs:
-            ActiveContext.active_documents.update(request.documents)
+            docs = [Path(doc).name for doc in request.documents]
+            ActiveContext.active_documents.update(docs)
 
 
 

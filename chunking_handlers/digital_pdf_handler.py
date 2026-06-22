@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 import fitz
 import numpy as np
@@ -408,11 +408,11 @@ def chunk(
         body_elements: list,
         pdf_meta: PdfMeta,
         doc_type: DocType,
-) -> Tuple[List[Chunk], Dict[tuple, List[Chunk]], Dict[tuple, List[Chunk]]]:
+) -> Tuple[List[Chunk], Dict[tuple, Set[Tuple[str, int]]], Dict[tuple,Set[Tuple[str, int]]]]:
 
     chunks: List[Chunk] = []
-    image_to_chunks: Dict[tuple, List[Chunk]] = {}
-    table_to_chunks: Dict[tuple, List[Chunk]] = {}
+    image_to_chunks: Dict[tuple, Set[Tuple[str, int]]] = {}
+    table_to_chunks: Dict[tuple, Set[Tuple[str, int]]] = {}
     chunk_index = 0
     doc_id = pdf_meta.doc_id
 
@@ -447,7 +447,7 @@ def chunk(
                 token_count=_token_count(full_text),
             )
             chunks.append(c)
-            image_to_chunks.setdefault((doc_id, el.element_id), []).append(c)
+            image_to_chunks.setdefault((doc_id, el.element_id), []).append((doc_id, chunk_index))
             chunk_index += 1
             i += 1
 
@@ -477,7 +477,7 @@ def chunk(
                     token_count=_token_count(full_text),
                 )
                 chunks.append(c)
-                table_to_chunks.setdefault((doc_id, el.element_id), []).append(c)
+                table_to_chunks.setdefault((doc_id, el.element_id), []).append((doc_id, chunk_index))
                 chunk_index += 1
 
             else:
@@ -502,7 +502,7 @@ def chunk(
                         token_count=_token_count(full_text),
                     )
                     chunks.append(c)
-                    table_to_chunks.setdefault((doc_id, el.element_id), []).append(c)
+                    table_to_chunks.setdefault((doc_id, el.element_id), []).append((doc_id, chunk_index))
                     chunk_index += 1
 
             i += 1
