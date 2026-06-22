@@ -1,4 +1,4 @@
-from query_router import  Intent, handle_request, ActiveContext
+from query_router import Intent, handle_request, ActiveContext
 from data_gathering import UserRequest, ingest
 from index_embedd import index_images, VectorStore, get_image_id, index_chunks, index_chunk_images
 from pathlib import Path
@@ -13,8 +13,8 @@ from data_gathering import Data
 from handlers import *
 from resolver import resolve
 
-
 AUDIO_TRANSCRIPT = None
+
 
 def detect_file_type(file_path):
     path = Path(file_path)
@@ -36,7 +36,7 @@ def get_doc_chunks(file_path):
         if chunks == []:
             return process_scanned_pdf(file_path)
 
-        return  chunks, meta, img_idx, tbl_idx
+        return chunks, meta, img_idx, tbl_idx
 
     if mime in [
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -44,7 +44,6 @@ def get_doc_chunks(file_path):
     ]:
         #word
         return process_docx(file_path)
-
 
     if mime in [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -56,7 +55,6 @@ def get_doc_chunks(file_path):
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "application/vnd.ms-powerpoint"
     ]:
-
         return process_pptx(file_path)
     # if mime.startswith("video/"):
     #     return "Video"
@@ -64,8 +62,7 @@ def get_doc_chunks(file_path):
     return "invalid"
 
 
-
-def ingest_image(image_paths:List[str]):
+def ingest_image(image_paths: List[str]):
     not_indexed_images = []
     for im_path in image_paths:
         p = Path(im_path)
@@ -78,7 +75,8 @@ def ingest_image(image_paths:List[str]):
 
     index_images(not_indexed_images)
 
-def index_to_faiss(chunks:List[Chunk]):
+
+def index_to_faiss(chunks: List[Chunk]):
     index_chunks(chunks)
     index_chunk_images(chunks)
 
@@ -87,15 +85,13 @@ def handle_image(intent, request, target_files):
     ##TODO image path are not necesaarily from request
     image_paths = [image for image in target_files.images] if target_files.current_images else []
 
-
-
     match intent:
         case Intent.IMAGE_SEARCH:
-            if len(request.images) <4:
+            if len(request.images) < 4:
                 response = send_images_to_vlm(image_paths, request)
                 print(response)
             else:
-                result = retrieval(request.query, k = 5 , is_doc=False)
+                result = retrieval(request.query, k=5, is_doc=False)
                 ##TODO send results along query to llm for final result
         case Intent.IMAGE_UNDERSTANDING:
             response = send_images_to_vlm(image_paths, request)
@@ -107,12 +103,7 @@ def handle_image(intent, request, target_files):
             )
 
 
-
-
-
-def handle_audio(intent, request ,target_files):
-
-
+def handle_audio(intent, request, target_files):
     transcripts = AUDIO_TRANSCRIPT
 
     related_chunks = []
@@ -134,35 +125,29 @@ def handle_audio(intent, request ,target_files):
             return "\n".join(transcripts)
 
         case Intent.AUDIO_QA:
-            result = retrieval(query=request.query,k=10,is_doc=True)
+            result = retrieval(query=request.query, k=10, is_doc=True)
             # return answer_with_context(
             #     query=request.query,
             #     context=context
             # )
 
         case Intent.AUDIO_SUMMARIZE:
-            summary = summarize_chunks(related_chunks, meta_audio,full_summary=True)
+            summary = summarize_chunks(related_chunks, meta_audio, full_summary=True)
         case Intent.AUDIO_OVERVIEW:
             overview = overview_func(related_chunks, meta_audio)
         case _:
             return "\n".join(transcripts)
 
 
-
 def handle_document(intent, request, target_files):
-
-
-
     related_chunks = []
     related_docs = []
 
     for doc_id in target_files.documents:
 
-
         related_chunks.extend(
             Data.doc_to_chunks.get(doc_id, [])
         )
-
 
         if doc_id in Data.docs:
             related_docs.append(
@@ -171,30 +156,33 @@ def handle_document(intent, request, target_files):
 
     match intent:
         case Intent.DOCUMENT_SUMMARIZE:
-            summary = summarize_chunks(related_chunks, related_docs,full_summary=True)
+            summary = summarize_chunks(related_chunks, related_docs, full_summary=True)
+
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
-            summary = summarize_chunks(related_chunks, related_docs, Full_summary=False, query= request.query)
+            summary = summarize_chunks(related_chunks, related_docs, Full_summary=False, query=request.query)
+
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
             result = retrieval(query=request.query, k=10, is_doc=True)
-            # return answer_with_context(
-            #     query=request.query,
-            #     context=context
-            # )
+
         case Intent.DOCUMENT_OVERVIEW:
             overview = overview_func(related_chunks, related_docs)
+
         case Intent.DOCUMENT_FULL_EXPLAIN:
             explain_doc(related_chunks, related_docs, full_explanation=True)
+
         case Intent.DOCUMENT_SECTION_EXPLAIN:
-            explain_doc(related_chunks, related_docs, full_explanation=False, query= request.query)
+            explain_doc(related_chunks, related_docs, full_explanation=False, query=request.query)
+
         case Intent.COMPARE_DOCUMENTS:
             compare_documents()
+
         case Intent.DOCUMENT_ACTION:
             document_actions()
+
         case _:
             raise ValueError(
                 f"Unhandled intent: {intent}"
             )
-
 
 
 def handle_general(intent, request):
@@ -211,13 +199,12 @@ def handle_general(intent, request):
     return response.choices[0].message.content
 
 
-def handle_uploads(request:UserRequest):
+def handle_uploads(request: UserRequest):
     if ActiveContext.has_file:
         if ActiveContext.active_documents is not None and len(ActiveContext.active_documents) > 0:
 
             for doc_path in request.documents:
                 chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
-
 
                 ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
                 index_to_faiss(chunks)
@@ -242,12 +229,11 @@ def handle_uploads(request:UserRequest):
             AUDIO_TRANSCRIPT = transcripts
 
     if ActiveContext.active_images is not None and len(ActiveContext.active_images) > 0:
-            image_paths = [image_path for image_path in ActiveContext.active_images]
-            ingest_image(image_paths)
+        image_paths = [image_path for image_path in ActiveContext.active_images]
+        ingest_image(image_paths)
 
 
 def handle_query(request: UserRequest):
-
     intent, ctx = handle_request(request)
     handle_uploads(request)
     target_files = resolve(request)
@@ -257,18 +243,15 @@ def handle_query(request: UserRequest):
         case (Intent.IMAGE_SEARCH | Intent.IMAGE_UNDERSTANDING):
             return handle_image(intent, request, target_files)
 
-        case (Intent.AUDIO_QA| Intent.AUDIO_SUMMARIZE| Intent.AUDIO_TRANSCRIBE | Intent.AUDIO_OVERVIEW):
+        case (Intent.AUDIO_QA | Intent.AUDIO_SUMMARIZE | Intent.AUDIO_TRANSCRIBE | Intent.AUDIO_OVERVIEW):
             return handle_audio(intent, request, target_files)
 
         case (
-            Intent.GENERAL_CHAT| Intent.UNKNOWN ):
+        Intent.GENERAL_CHAT | Intent.UNKNOWN ):
             return handle_general(intent, request, target_files)
 
         case _:
             return handle_document(intent, request, target_files)
-
-
-
 
 # def answer_with_context(
 #     query: str,
