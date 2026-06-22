@@ -95,7 +95,6 @@ class ResolvedTargets:
     confidence: float = 1.0
 
 
-
 def normalize_name(name: str) -> str:
 
     name = Path(name).name.lower()
@@ -104,7 +103,6 @@ def normalize_name(name: str) -> str:
         name = ".".join(name.split(".")[:-1])
 
     return name.strip()
-
 
 
 def resolve_ordinals(query: str) -> list[str]:
@@ -141,7 +139,6 @@ def resolve_ordinals(query: str) -> list[str]:
     return list(set(matched))
 
 
-
 def extract_document_mentions(
     query: str,
     threshold: int = 85
@@ -172,15 +169,11 @@ def extract_document_mentions(
     return list(set(matches))
 
 
-def contains_signal(
-    query: str,
-    signals: set[str]
-) -> bool:
+def contains_signal(query: str, signals: set[str]) -> bool:
 
     q = query.lower()
 
-    return any(
-        signal.lower() in q
+    return any(signal.lower() in q
         for signal in signals
     )
 

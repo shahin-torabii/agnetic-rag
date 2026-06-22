@@ -174,7 +174,7 @@ def handle_document(intent, request, target_files):
             explain_doc(related_chunks, related_docs, full_explanation=False, query=request.query)
 
         case Intent.COMPARE_DOCUMENTS:
-            compare_documents()
+            compare_documents(target_files.documents)
 
         case Intent.DOCUMENT_ACTION:
             document_actions()

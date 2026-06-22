@@ -2,7 +2,7 @@ from collections import defaultdict
 from LLM import HF_LLM, encode_image_to_base64
 from retreival import retrieval
 from typing import List
-from data_gathering import Chunk , BaseMeta
+from data_gathering import Chunk , BaseMeta, Data
 
 
 def send_images_to_vlm(image_paths: list[str],query: str, context:str = ""):
@@ -77,9 +77,79 @@ def select_related_chunks(chunks, query: str =  None):
     return retrieval(query, k=15, is_doc=True)
 
 
-def compare_documents():
-    pass
+def compare_documents(target_files):
 
+    docs_overviews = {}
+
+    for file in target_files:
+
+        related_chunks = (
+            Data.doc_to_chunks.get(file, [])
+        )
+
+        meta = Data.docs.get(file)
+
+        overview = overview_func(
+            chunks=related_chunks,
+            meta=meta
+        )
+
+        docs_overviews[file] = overview
+
+    comparison_input = []
+
+    for file, overview in docs_overviews.items():
+        comparison_input.append(
+            f"""
+    Document: {file}
+
+    Overview:
+    {overview}
+    """
+        )
+
+    comparison_text = "\n\n".join(comparison_input)
+
+    system_prompt = """
+    You are an expert document comparison assistant.
+
+    Compare the provided documents.
+
+    For each document identify:
+
+    - purpose
+    - main topics
+    - important concepts
+
+    Then provide:
+
+    1. Similarities
+    2. Differences
+    3. Strengths of each document
+    4. Unique contributions
+    5. Overall comparison
+
+    Be factual.
+    Do not invent information.
+    """
+
+    response = HF_LLM.client.chat.completions.create(
+        model=HF_LLM.model_name,
+        temperature=0,
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": comparison_text
+            }
+        ]
+    )
+
+    comparison =  response.choices[0].message.content
+    return comparison
 
 def document_actions():
     pass
