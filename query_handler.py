@@ -168,7 +168,7 @@ def handle_document(intent, request, target_files):
                 summary = summarize_chunks(related_chunks[doc_id], related_docs[doc_id], full_summary=False, query=request.query)
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
-            result = retrieval(query=request.query, k=4, is_doc=True)
+            result = retrieval(query=request.query, k=10, is_doc=True)
             print("\n\n")
             print(result)
         case Intent.DOCUMENT_OVERVIEW:
@@ -210,6 +210,172 @@ def handle_document(intent, request, target_files):
             )
 
 
+def handle_multimodal(intent, request, target_files):
+
+    audios = []
+
+    for doc_id in target_files.documents:
+        if doc_id not in Data.docs:
+            continue
+
+        meta = Data.docs[doc_id]
+        if getattr(meta, "doc_type", "").lower() == "audio":
+            audios.append(doc_id)
+        else:
+            pass
+
+    images = list(target_files.images)
+
+    related_doc_chunks = {}
+    related_doc_docs = {}
+
+    for doc_id in target_files.documents:
+
+        meta = Data.docs.get(doc_id)
+
+        if (meta is not None and getattr(meta, "doc_type", "").lower() == "audio"):
+            continue
+
+        related_doc_chunks[doc_id] = ( Data.doc_to_chunks.get(doc_id, []))
+
+        if doc_id in Data.docs:
+            related_doc_docs[doc_id] = (Data.docs[doc_id] )
+
+    match intent:
+
+        case Intent.DOCUMENT_SUMMARIZE:
+            summaries = []
+            for doc_id in related_doc_chunks:
+
+                summary = summarize_chunks(related_doc_chunks[doc_id], related_doc_docs[doc_id], full_summary=True)
+                summaries.append(summary)
+
+            image_res = handle_image(Intent.IMAGE_UNDERSTANDING, request, images)
+
+            audio_res = handle_audio(Intent.AUDIO_SUMMARIZE, request, audios)
+
+            result = {
+                "docs": summaries,
+                "images": image_res,
+                "audio": audio_res
+            }
+
+        case Intent.DOCUMENT_SECTION_SUMMARIZE:
+
+            summaries = []
+
+            for doc_id in related_doc_chunks:
+
+                summary = summarize_chunks(related_doc_chunks[doc_id], related_doc_docs[doc_id], full_summary=False,
+                                           query=request.query)
+                summaries.append(summary)
+
+            image_res = handle_image(Intent.IMAGE_UNDERSTANDING,request,images)
+
+            audio_res = handle_audio(Intent.AUDIO_SUMMARIZE, request, audios)
+
+            result = {
+                "docs": summaries,
+                "images": image_res,
+                "audio": audio_res
+            }
+
+        case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
+
+            doc_res = retrieval(query=request.query,k=10, is_doc=True)
+
+            image_res = handle_image(Intent.IMAGE_SEARCH, request, images)
+
+            audio_res = handle_audio(Intent.AUDIO_QA, request, audios)
+
+            results ={
+                "docs": doc_res,
+                "images": image_res,
+                "audio": audio_res
+            }
+
+        case Intent.DOCUMENT_OVERVIEW:
+
+            overviews = []
+
+            for doc_id in related_doc_chunks:
+
+                overview = overview_func(related_doc_chunks[doc_id], related_doc_docs[doc_id])
+
+                overviews.append(overview)
+
+            image_res = handle_image(Intent.IMAGE_UNDERSTANDING, request, images)
+
+            audio_res = handle_audio(Intent.AUDIO_OVERVIEW, request, audios)
+
+            results =  {
+                "docs": overviews,
+                "images": image_res,
+                "audio": audio_res
+            }
+
+        case Intent.DOCUMENT_FULL_EXPLAIN:
+
+            explanations = []
+
+            for doc_id in related_doc_chunks:
+
+                explanation = explain_doc(related_doc_chunks[doc_id], related_doc_docs[doc_id],
+                    full_explanation=True
+                )
+
+                explanations.append(explanation)
+
+            image_res = handle_image( Intent.IMAGE_UNDERSTANDING, request, images)
+
+            audio_res = handle_audio(Intent.AUDIO_OVERVIEW, request, audios)
+
+            result =  {
+                "docs": explanations,
+                "images": image_res,
+                "audio": audio_res
+            }
+
+        case Intent.DOCUMENT_SECTION_EXPLAIN:
+
+            explanations = []
+
+            for doc_id in related_doc_chunks:
+
+                explanation = explain_doc(related_doc_chunks[doc_id], related_doc_docs[doc_id],
+                    full_explanation=False,
+                    query=request.query
+                )
+
+                explanations.append(explanation)
+
+            image_res = handle_image(Intent.IMAGE_UNDERSTANDING, request, images)
+
+            audio_res = handle_audio(Intent.AUDIO_SUMMARIZE, request, audios)
+
+            result =  {
+                "docs": explanations,
+                "images": image_res,
+                "audio": audio_res
+            }
+
+        case Intent.COMPARE_DOCUMENTS:
+
+            return compare_documents(
+                list(related_doc_chunks.keys())
+            )
+
+        case Intent.DOCUMENT_ACTION:
+
+            return document_actions()
+
+        case _:
+
+            raise ValueError(
+                f"Unhandled intent: {intent}"
+            )
+
+
 def handle_general(intent, request):
     ##TODO change this to a better handler
     response = HF_LLM.client.chat.completions.create(
@@ -229,6 +395,8 @@ def handle_uploads(request: UserRequest):
         if ActiveContext.active_documents is not None and len(ActiveContext.active_documents) > 0:
             print("is document")
             for doc_path in request.documents:
+                print("here is path")
+                print(doc_path)
                 chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
                 print("doc process done")
                 ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
@@ -260,10 +428,6 @@ def handle_uploads(request: UserRequest):
         ingest_image(image_paths)
 
 
-def handle_multimodal(intent, request, target_files):
-    pass
-
-
 def handle_query(request: UserRequest):
     print("enter the handler")
     intent, ctx = handle_request(request)
@@ -273,6 +437,7 @@ def handle_query(request: UserRequest):
     handle_uploads(request)
     print("uploade done")
     target_files = resolve(request)
+    print("targets: ", target_files)
     print("resolve done")
 
     print("docs:", target_files)
