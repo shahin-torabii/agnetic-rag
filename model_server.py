@@ -30,6 +30,9 @@ class TextEmbeddingRequest(BaseModel):
 class ImageEmbeddingRequest(BaseModel):
     image_paths: List[str]
 
+class TextEmbeddingRequestOpenclip(BaseModel):
+    query:str
+
 class RerankRequest(BaseModel):
     query: str
     chunks: List[dict]
@@ -45,7 +48,7 @@ async def embed_text_endpoint(req:TextEmbeddingRequest):
     return {"embeddings": vecs.tolist()}
 
 
-@app.post("/embed/image")
+@app.post("/embed/open_clip/image")
 def embed_image_endpoint(req: ImageEmbeddingRequest):
     try:
         images = torch.stack([clip_preprocess(Image.open(p).convert("RGB")) for p in req.image_paths])
@@ -54,6 +57,21 @@ def embed_image_endpoint(req: ImageEmbeddingRequest):
             vecs = clip_model.encode_image(images)
             vecs = torch.nn.functional.normalize(vecs, p=2, dim=-1)
         return {"embeddings": vecs.cpu().numpy().tolist()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/embed/open_clip/text")
+def embed_text_openclip_endpoint(req: TextEmbeddingRequestOpenclip):
+    try:
+        q_token = open_clip.tokenize([req.query])
+
+        with torch.no_grad():
+            q_vec = clip_model.encode_text(q_token)
+        q_vec = torch.nn.functional.normalize(q_vec, p=2, dim=-1)
+        q_vec = q_vec.cpu().numpy().astype("float32").tolist()
+
+        return {"embeddings": q_vec}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

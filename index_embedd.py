@@ -5,7 +5,6 @@ import faiss
 import torch
 from typing import List, Dict
 import numpy as np
-from PIL import Image
 from data_gathering import Chunk
 from dotenv import load_dotenv
 import os
@@ -116,7 +115,7 @@ def embed_image(image_paths: List[str]) -> np.ndarray:
     # return vecs.cpu().numpy().astype("float32")
 
     response = requests.post(
-        f"{SERVER_URL}/embed/image",
+        f"{SERVER_URL}/embed/open_clip/image",
         json={"image_paths": image_paths}
     )
     response.raise_for_status()

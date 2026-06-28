@@ -7,6 +7,7 @@ from index_embedd import VectorStore, embed_text, embed_image, Models
 import numpy as np
 from LLM import HF_LLM
 import requests
+from index_embedd import embed_image
 
 SERVER_URL = "http://127.0.0.1:8000"
 
@@ -74,17 +75,17 @@ def search_text(query: str, k: int = 5, oversample_factor: int = 4) -> List[dict
 
 
 def search_chunk_image(query: str, k: int = 5) -> List[dict]:
-    clip_model = Models.clip_model
     image_index = VectorStore.doc_image_index
     image_meta = VectorStore.doc_image_meta
     if image_index is None or image_index.ntotal == 0:
         return []
-    q_token = open_clip.tokenize([query])
 
-    with torch.no_grad():
-        q_vec = clip_model.encode_text(q_token)
-    q_vec =  torch.nn.functional.normalize(q_vec, p=2, dim=-1)
-    q_vec = q_vec.cpu().numpy().astype("float32")
+    response = requests.post(
+        f"{SERVER_URL}/embed/open_clip/text",
+        json={"query": query}
+    )
+    response.raise_for_status()
+    q_vec = np.array(response.json()["embeddings"], dtype="float32")
 
     scores, ids = image_index.search(q_vec, k)
 
@@ -106,17 +107,24 @@ def search_chunk_image(query: str, k: int = 5) -> List[dict]:
 
 
 def search_image(query: str, k: int = 5) -> List[dict]:
-    clip_model = Models.clip_model
     image_index = VectorStore.image_index
     image_meta = VectorStore.image_meta
     if image_index is None or image_index.ntotal == 0:
         return []
-    q_token = open_clip.tokenize([query])
+    # q_token = open_clip.tokenize([query])
+    #
+    # with torch.no_grad():
+    #     q_vec = clip_model.encode_text(q_token)
+    # q_vec =  torch.nn.functional.normalize(q_vec, p=2, dim=-1)
+    # q_vec = q_vec.cpu().numpy().astype("float32")
 
-    with torch.no_grad():
-        q_vec = clip_model.encode_text(q_token)
-    q_vec =  torch.nn.functional.normalize(q_vec, p=2, dim=-1)
-    q_vec = q_vec.cpu().numpy().astype("float32")
+
+    response = requests.post(
+        f"{SERVER_URL}/embed/open_clip/text",
+        json={"query": query}
+    )
+    response.raise_for_status()
+    q_vec =  np.array(response.json()["embeddings"], dtype="float32")
 
     scores, ids = image_index.search(q_vec, k)
 
@@ -132,8 +140,6 @@ def search_image(query: str, k: int = 5) -> List[dict]:
             "doc_id":       meta["doc_id"],
         })
     return results
-
-
 
 
 def build_context(text_results:List[dict], image_results:List[dict]) ->str:
@@ -152,6 +158,7 @@ def build_context(text_results:List[dict], image_results:List[dict]) ->str:
                   parts.append(f"[{path}| image_{r["image_id"]}]\n context: {related.text}")
 
     return "\n___\n".join(parts)
+
 
 def rerank(query: str, chunks: List[dict],
            top_k: int = 5, threshold: float = 0.1) -> List[dict]:
@@ -271,7 +278,7 @@ def retrieval_text(query: str, k: int = 3,
     return final_res
 
 
-def _search_and_rerank_chunk_images( query: str,rerank_query: str) -> tuple[list[dict], dict]:
+def search_and_rerank_chunk_images( query: str,rerank_query: str) -> tuple[list[dict], dict]:
 
     image_results = search_chunk_image(query, k=10)
 
@@ -302,13 +309,12 @@ def _search_and_rerank_chunk_images( query: str,rerank_query: str) -> tuple[list
 def retrieval_chunk_image(query: str, k: int = 3,
                     min_threshold: float = 0.08) -> List[dict]:
 
-    reranked, image_scores = _search_and_rerank_chunk_images(query, rerank_query=query)
-
+    reranked, image_scores = search_and_rerank_chunk_images(query, rerank_query=query)
 
     if not reranked or reranked[0]["score"] < min_threshold:
         print("⚠️  Low image confidence — activating query expansion fallback...")
         expanded_query          = improve_query(query)
-        reranked, image_scores  = _search_and_rerank_chunk_images(
+        reranked, image_scores  = search_and_rerank_chunk_images(
             expanded_query, rerank_query=expanded_query
         )
 
@@ -380,20 +386,13 @@ def retrieval( query: str,k: int = 3,min_threshold: float = 0.08,is_doc: bool = 
     combined = []
     for r in text_results + image_results:
 
-        key = (
-            r["doc_id"],
-            r["chunk_index"]
-        )
+        key = (r["doc_id"], r["chunk_index"])
 
         if key not in seen:
             seen.add(key)
             combined.append(r)
-    context = build_context(
-        text_results=[
-            r
-            for r in combined
-            if r in text_results
-        ],
+    context = build_context(text_results=[r for r in combined if r in text_results ]
+                            ,
         image_results=[
             r
             for r in combined
