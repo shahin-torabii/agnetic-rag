@@ -553,8 +553,9 @@ def manage_active_context(request:UserRequest):
 
 
 def handle_request(request: UserRequest):
-
+    print("enter the handle request")
     intent , ctx = route_query(request)
+    print("finish routing")
     manage_active_context(request)
 
     return intent, ctx

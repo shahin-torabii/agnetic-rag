@@ -13,7 +13,10 @@ import pickle
 from data_gathering import Data
 from pathlib import Path
 import hashlib
+import requests
 
+
+SERVER_URL = "http://127.0.0.1:8000"
 
 
 class Models:
@@ -22,7 +25,6 @@ class Models:
     clip_preprocess = None
     reranker =None
     hf_api_key = None
-
 
 
 class VectorStore:
@@ -59,52 +61,66 @@ def load_api_key():
 
 
 def initialize_models():
+
     if Models.e5_model is None:
-        e5_model = SentenceTransformer("intfloat/multilingual-e5-base")
+        print("Loading E5 Model...", flush=True)
+        Models.e5_model = SentenceTransformer("intfloat/multilingual-e5-base", device="cpu")
+
     if Models.clip_model is None:
+        print("Loading CLIP Model...", flush=True)
         clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
-            "ViT-B-32",
-            pretrained="laion2b_s34b_b79k"
+            "ViT-B-32", pretrained="laion2b_s34b_b79k", device="cpu"
         )
         clip_model.eval()
         device = "cuda" if torch.cuda.is_available() else "cpu"
         clip_model.to(device)
+        Models.clip_model = clip_model
+        Models.clip_preprocess = clip_preprocess
 
     if Models.reranker is None:
-        reranker = CrossEncoder("BAAI/bge-reranker-base", trust_remote_code=True)
-
-    Models.e5_model = e5_model
-    Models.clip_model = clip_model
-    Models.clip_preprocess = clip_preprocess
-    Models.reranker = reranker
+        print("Loading Reranker...", flush=True)
+        Models.reranker = CrossEncoder("BAAI/bge-reranker-base", trust_remote_code=True, device="cpu")
 
 
 _initialized = False
 
 def embed_text(texts: List[str], is_query: bool = False) -> np.ndarray:
     initialize()
-    prefix  = "query: " if is_query else "passage: "
-    prefixed = [prefix + t for t in texts]
-    vecs = Models.e5_model.encode(prefixed, normalize_embeddings=True)
-    return np.array(vecs, dtype="float32")
+    # print(f"Embedding {len(texts)} text chunks...", flush=True)
+    # prefix  = "query: " if is_query else "passage: "
+    # prefixed = [prefix + t for t in texts]
+    # vecs = Models.e5_model.encode(prefixed, normalize_embeddings=True)
+    # print("Text embedding complete.", flush=True)
+    # return np.array(vecs, dtype="float32")
+    response = requests.post(f"{SERVER_URL}/embed/text",
+                             json={"texts":texts, "is_query":is_query})
+    response.raise_for_status()
+    return np.array(response.json()["embeddings"], dtype=np.float32)
 
-####memory explosion issue: for example if someone upload 500 images
-#Todo Solve later
 def embed_image(image_paths: List[str]) -> np.ndarray:
+    ####memory explosion issue: for example if someone upload 500 images
+    # Todo Solve later
     initialize()
-    images = torch.stack([
-        Models.clip_preprocess(Image.open(p).convert("RGB"))
-        for p in image_paths
-    ])                                              # shape (n, 3, 224, 224)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    images = images.to(device)
-    with torch.no_grad():
-        vecs = Models.clip_model.encode_image(images)
-        vecs = torch.nn.functional.normalize(vecs, p=2, dim=-1)
+    # print(f"Processing {len(image_paths)} images through CLIP...", flush=True)
+    # images = torch.stack([
+    #     Models.clip_preprocess(Image.open(p).convert("RGB"))
+    #     for p in image_paths
+    # ])
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    # images = images.to(device)
+    # print(f"Sending images to device: {device}...", flush=True)
+    # with torch.no_grad():
+    #     vecs = Models.clip_model.encode_image(images)
+    #     vecs = torch.nn.functional.normalize(vecs, p=2, dim=-1)
+    # print("Image embedding complete.", flush=True)
+    # return vecs.cpu().numpy().astype("float32")
 
-    return vecs.cpu().numpy().astype("float32")
-
-
+    response = requests.post(
+        f"{SERVER_URL}/embed/image",
+        json={"image_paths": image_paths}
+    )
+    response.raise_for_status()
+    return np.array(response.json()["embeddings"], dtype="float32")
 
 def index_chunks(chunks: List[Chunk]):
     """Embed chunk texts and insert into the text FAISS index."""
@@ -274,19 +290,16 @@ def load(directory: str):
     print(f" loaded from {directory}/")
 
 
-
 def initialize():
-
     global _initialized
-
     if _initialized:
         return
 
     set_environ()
-    load_api_key()
-    initialize_models()
 
-    # if os.path.exists("vector_store"):
-    #     load("vector_store")
+    load_api_key()
+
+    # print("Loading models... (this might take a minute)", flush=True)
+    # print("Models loaded successfully!", flush=True)
 
     _initialized = True

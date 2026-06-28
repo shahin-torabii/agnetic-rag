@@ -6,6 +6,9 @@ from data_gathering import Data
 from index_embedd import VectorStore, embed_text, embed_image, Models
 import numpy as np
 from LLM import HF_LLM
+import requests
+
+SERVER_URL = "http://127.0.0.1:8000"
 
 BLEND_LOW_WEIGHTS  = (0.8, 0.2)
 BLEND_HIGH_WEIGHTS = (0.2, 0.8)
@@ -152,17 +155,25 @@ def build_context(text_results:List[dict], image_results:List[dict]) ->str:
 
 def rerank(query: str, chunks: List[dict],
            top_k: int = 5, threshold: float = 0.1) -> List[dict]:
-    if not chunks:
-        return []
+    # if not chunks:
+    #     return []
+    #
+    # pairs = [(query, chunk["text"]) for chunk in chunks]
+    # rerank_scores = Models.reranker.predict(pairs)
+    #
+    # reranked = []
+    # for chunk, score in zip(chunks, rerank_scores):
+    #     result = dict(chunk)
+    #     result["score"] = round(float(score), 4)
+    #     reranked.append(result)
 
-    pairs = [(query, chunk["text"]) for chunk in chunks]
-    rerank_scores = Models.reranker.predict(pairs)
+    response = requests.post(
+        f"{SERVER_URL}/rerank",
+        json={"query": query, "chunks": chunks}
+    )
+    response.raise_for_status()
 
-    reranked = []
-    for chunk, score in zip(chunks, rerank_scores):
-        result = dict(chunk)
-        result["score"] = round(float(score), 4)
-        reranked.append(result)
+    reranked = response.json()["chunks"]
 
     reranked.sort(key=lambda x: x["score"], reverse=True)
     return [r for r in reranked if r["score"] > threshold][:top_k]

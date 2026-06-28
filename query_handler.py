@@ -156,6 +156,7 @@ def handle_document(intent, request, target_files):
             for doc_id in target_files.documents:
                 summary = summarize_chunks(related_chunks[doc_id], related_docs[doc_id], full_summary=True)
                 summaries.append(summary)
+            print("\n".join(summaries))
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
             summaries = []
             for doc_id in target_files.documents:
@@ -163,7 +164,8 @@ def handle_document(intent, request, target_files):
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
             result = retrieval(query=request.query, k=10, is_doc=True)
-
+            print("\n\n")
+            print(result)
         case Intent.DOCUMENT_OVERVIEW:
             over_views = []
             for doc_id in target_files.documents:
@@ -213,12 +215,14 @@ def handle_general(intent, request):
 def handle_uploads(request: UserRequest):
     if ActiveContext.has_file:
         if ActiveContext.active_documents is not None and len(ActiveContext.active_documents) > 0:
-
+            print("is document")
             for doc_path in request.documents:
                 chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
-
+                print("doc process done")
                 ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
+                print("ingest done")
                 index_to_faiss(chunks)
+                print("faiss index done")
 
         if ActiveContext.active_audio is not None and len(ActiveContext.active_audio) > 0:
 
@@ -245,9 +249,13 @@ def handle_uploads(request: UserRequest):
 
 
 def handle_query(request: UserRequest):
+    print("enter the handler")
     intent, ctx = handle_request(request)
+    print("intent done")
     handle_uploads(request)
+    print("uploade done")
     target_files = resolve(request)
+    print("resolve done")
 
     print("intent:",intent)
     print("docs:", target_files)
