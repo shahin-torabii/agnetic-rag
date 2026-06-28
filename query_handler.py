@@ -12,6 +12,7 @@ import puremagic
 from data_gathering import Data
 from handlers import *
 from resolver import resolve
+from typing import List
 
 AUDIO_TRANSCRIPT = None
 
@@ -156,14 +157,18 @@ def handle_document(intent, request, target_files):
             for doc_id in target_files.documents:
                 summary = summarize_chunks(related_chunks[doc_id], related_docs[doc_id], full_summary=True)
                 summaries.append(summary)
-            print("\n".join(summaries))
+            print("\n\n".join(summaries))
+            print("\n\n\n")
+            print("-" * 50)
+            print("final summary")
+            print(summaries)
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
             summaries = []
             for doc_id in target_files.documents:
                 summary = summarize_chunks(related_chunks[doc_id], related_docs[doc_id], full_summary=False, query=request.query)
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
-            result = retrieval(query=request.query, k=10, is_doc=True)
+            result = retrieval(query=request.query, k=4, is_doc=True)
             print("\n\n")
             print(result)
         case Intent.DOCUMENT_OVERVIEW:
@@ -171,12 +176,19 @@ def handle_document(intent, request, target_files):
             for doc_id in target_files.documents:
                 overview = overview_func(related_chunks[doc_id], related_docs[doc_id])
                 over_views.append(overview)
+            print("\n\n\n")
+            print("-" * 50)
+            print("final explanation")
+            print("\n\n".join(over_views))
 
         case Intent.DOCUMENT_FULL_EXPLAIN:
             explanations = []
             for doc_id in target_files.documents:
                 explanation = explain_doc(related_chunks[doc_id], related_docs[doc_id], full_explanation=True)
                 explanations.append(explanation)
+            print("\n\n\n")
+            print("-"*50)
+            print("final explanation")
             print("\n\n".join(explanations))
 
         case Intent.DOCUMENT_SECTION_EXPLAIN:
@@ -248,16 +260,21 @@ def handle_uploads(request: UserRequest):
         ingest_image(image_paths)
 
 
+def handle_multimodal(intent, request, target_files):
+    pass
+
+
 def handle_query(request: UserRequest):
     print("enter the handler")
     intent, ctx = handle_request(request)
     print("intent done")
+
+    print("intent:",intent)
     handle_uploads(request)
     print("uploade done")
     target_files = resolve(request)
     print("resolve done")
 
-    print("intent:",intent)
     print("docs:", target_files)
 
     match intent:
@@ -268,12 +285,14 @@ def handle_query(request: UserRequest):
         case (Intent.AUDIO_QA | Intent.AUDIO_SUMMARIZE | Intent.AUDIO_TRANSCRIBE | Intent.AUDIO_OVERVIEW):
             return handle_audio(intent, request, target_files)
 
-        case (
-        Intent.GENERAL_CHAT | Intent.UNKNOWN ):
+        case (Intent.GENERAL_CHAT | Intent.UNKNOWN ):
             return handle_general(intent, request, target_files)
 
         case _:
-            return handle_document(intent, request, target_files)
+            if request.audio or request.images:
+                return handle_multimodal(intent, request, target_files)
+            else:
+                return handle_document(intent, request, target_files)
 
 # def answer_with_context(
 #     query: str,

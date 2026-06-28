@@ -10,8 +10,9 @@ class HF_LLM:
     #base_url="https://router.huggingface.co/v1"
     client = None
 
-    model_name ="qwen/qwen3.5-9b"
-    vision_model_name = "qwen/qwen3-vl-8b-instruct",
+    strong_model_name = "qwen/qwen3-8b"
+    fast_model_name = "qwen/qwen-2.5-7b-instruct"
+    vision_model_name = "qwen/qwen3-vl-8b-instruct"
     base_url = "https://openrouter.ai/api/v1"
 
 

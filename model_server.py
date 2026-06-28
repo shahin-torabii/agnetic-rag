@@ -58,7 +58,7 @@ def embed_image_endpoint(req: ImageEmbeddingRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-app.post("/rerank")
+@app.post("/rerank")
 def rerank_endpoint(req: RerankRequest):
     if not req.chunks:
         return {"chunks": []}
