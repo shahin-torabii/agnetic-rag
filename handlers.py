@@ -323,7 +323,7 @@ details, explain terminology and relationships, and avoid merely
 summarizing.
 """
 
-    return call_llm(HF_LLM.fast_model_name, system_prompt, text, max_tokens=600)
+    return call_llm(HF_LLM.fast_model_name, system_prompt, text, max_tokens=800)
 
 
 def explain_final(partial_explanations, meta=None, query=None):
@@ -338,15 +338,28 @@ Source Type: {meta.source_type}
 """
 
     system_prompt = f"""
-You are a teaching assistant.
+    You are a teaching assistant.
 
-{meta_context}
+    {meta_context}
 
-You are given multiple explanations from different parts of the same
-document. Create ONE coherent explanation: organize logically, remove
-redundancy, preserve technical details, and connect concepts across
-sections.
-"""
+    You are given multiple explanations extracted from different sections
+    of the same document.
+
+    Your task is to merge them into a single coherent teaching document.
+
+    Requirements:
+    - Preserve important technical details.
+    - Preserve equations, definitions, examples, experimental findings,
+      hyperparameters, assumptions, and conclusions.
+    - Explain relationships between concepts.
+    - Reorganize content logically when necessary.
+    - Remove only exact duplication.
+    - Do NOT shorten explanations merely for brevity.
+    - Do NOT summarize unless information is repeated.
+    - Prefer completeness over conciseness.
+
+    Your goal is to teach the document, not summarize it.
+    """
     response = call_llm(HF_LLM.strong_model_name, system_prompt, text, max_tokens=1700)
 
     return response

@@ -9,7 +9,6 @@ from chunking_handlers.word_handler import process_docx
 from chunking_handlers.pp_handler import process_pptx
 from chunking_handlers.excel_handler import process_excel
 import puremagic
-from data_gathering import Data
 from handlers import *
 from resolver import resolve
 from typing import List
@@ -85,6 +84,42 @@ def index_to_faiss(chunks: List[Chunk]):
     index_chunk_images(chunks)
 
 
+def final_rag_llm(query: str, context: str) -> str:
+    system_prompt = """
+You are a helpful assistant.
+Answer ONLY using the provided context.
+If context is insufficient, say you don't know.
+Be precise, clear, and structured.
+"""
+
+    response = HF_LLM.client.chat.completions.create(
+        model=HF_LLM.strong_model_name,   # or strong model
+        temperature=0.2,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": f"""
+Question:
+{query}
+
+Context:
+{context}
+"""
+            }
+        ]
+    )
+
+    return response.choices[0].message.content
+
+
+def build_context(chunks):
+    return "\n\n".join([
+        f"[{c.doc_id}:{c.chunk_index}]\n{c.text}"
+        for c in chunks
+    ])
+
+
 def handle_image(intent, request, target_files):
     ##TODO image path are not necesaarily from request
     image_paths = [image for image in target_files.images] if target_files.current_images else []
@@ -93,13 +128,16 @@ def handle_image(intent, request, target_files):
         case Intent.IMAGE_SEARCH:
             if len(request.images) < 4:
                 response = send_images_to_vlm(image_paths, request)
-                print(response)
+                return response
             else:
                 result = retrieval(request.query, k=5, is_doc=False)
-                ##TODO send results along query to llm for final result
+                context = build_context(result)
+                final_answer = final_rag_llm(request.query, context)
+                return final_answer
+
         case Intent.IMAGE_UNDERSTANDING:
             response = send_images_to_vlm(image_paths, request)
-            print(response)
+            return response
 
         case _:
             raise ValueError(
@@ -127,15 +165,21 @@ def handle_audio(intent, request, target_files):
 
         case Intent.AUDIO_TRANSCRIBE:
             audio_transcript =  "\n".join(transcripts)
+            return audio_transcript
 
         case Intent.AUDIO_QA:
             result = retrieval(query=request.query, k=10, is_doc=True)
+            context = build_context(result)
+            final_answer = final_rag_llm(request.query, context)
+            return final_answer
 
         case Intent.AUDIO_SUMMARIZE:
             summary = summarize_chunks(related_chunks, meta_audio, full_summary=True)
+            return summary
 
         case Intent.AUDIO_OVERVIEW:
             overview = overview_func(related_chunks, meta_audio)
+            return overview
 
         case _:
             return "\n".join(transcripts)
@@ -162,15 +206,24 @@ def handle_document(intent, request, target_files):
             print("-" * 50)
             print("final summary")
             print(summaries)
+            return "\n\n".join(summaries)
+
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
             summaries = []
             for doc_id in target_files.documents:
                 summary = summarize_chunks(related_chunks[doc_id], related_docs[doc_id], full_summary=False, query=request.query)
+                summaries.append(summary)
+
+            return "\n\n".join(summaries)
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
             result = retrieval(query=request.query, k=10, is_doc=True)
             print("\n\n")
             print(result)
+            context = build_context(result)
+            final_answer = final_rag_llm(request.query, context)
+            return final_answer
+
         case Intent.DOCUMENT_OVERVIEW:
             over_views = []
             for doc_id in target_files.documents:
@@ -180,6 +233,7 @@ def handle_document(intent, request, target_files):
             print("-" * 50)
             print("final explanation")
             print("\n\n".join(over_views))
+            return "\n\n".join(over_views)
 
         case Intent.DOCUMENT_FULL_EXPLAIN:
             explanations = []
@@ -190,6 +244,7 @@ def handle_document(intent, request, target_files):
             print("-"*50)
             print("final explanation")
             print("\n\n".join(explanations))
+            return "\n\n".join(explanations)
 
         case Intent.DOCUMENT_SECTION_EXPLAIN:
             explanations = []
@@ -197,9 +252,11 @@ def handle_document(intent, request, target_files):
                 explanation = explain_doc(related_chunks[doc_id], related_docs[doc_id], full_explanation=False, query=request.query)
                 explanations.append(explanation)
             print("\n\n".join(explanations))
+            return "\n\n".join(explanations)
 
         case Intent.COMPARE_DOCUMENTS:
-            compare_documents(target_files.documents)
+            compare_result = compare_documents(target_files.documents)
+            return compare_result
 
         case Intent.DOCUMENT_ACTION:
             document_actions()
@@ -259,6 +316,7 @@ def handle_multimodal(intent, request, target_files):
                 "images": image_res,
                 "audio": audio_res
             }
+            return result
 
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
 
@@ -275,24 +333,32 @@ def handle_multimodal(intent, request, target_files):
             audio_res = handle_audio(Intent.AUDIO_SUMMARIZE, request, audios)
 
             result = {
-                "docs": summaries,
+                "docs": "\n\n".join(summaries),
                 "images": image_res,
                 "audio": audio_res
             }
+            return result
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
 
             doc_res = retrieval(query=request.query,k=10, is_doc=True)
+            doc_context = build_context(doc_res)
+            final_doc_answer = final_rag_llm(request.query, doc_context)
 
             image_res = handle_image(Intent.IMAGE_SEARCH, request, images)
+            im_context = build_context(image_res)
+            final_im_answer = final_rag_llm(request.query, im_context)
 
             audio_res = handle_audio(Intent.AUDIO_QA, request, audios)
+            audio_context = build_context(audio_res)
+            final_audio_answer = final_rag_llm(request.query, audio_context)
 
             results ={
-                "docs": doc_res,
-                "images": image_res,
-                "audio": audio_res
+                "docs": final_doc_answer,
+                "images": final_im_answer,
+                "audio": final_audio_answer
             }
+            return results
 
         case Intent.DOCUMENT_OVERVIEW:
 
@@ -309,10 +375,11 @@ def handle_multimodal(intent, request, target_files):
             audio_res = handle_audio(Intent.AUDIO_OVERVIEW, request, audios)
 
             results =  {
-                "docs": overviews,
+                "docs": "\n\n".join(overviews),
                 "images": image_res,
                 "audio": audio_res
             }
+            return results
 
         case Intent.DOCUMENT_FULL_EXPLAIN:
 
@@ -331,10 +398,11 @@ def handle_multimodal(intent, request, target_files):
             audio_res = handle_audio(Intent.AUDIO_OVERVIEW, request, audios)
 
             result =  {
-                "docs": explanations,
+                "docs": "\n\n".join(explanations),
                 "images": image_res,
                 "audio": audio_res
             }
+            return result
 
         case Intent.DOCUMENT_SECTION_EXPLAIN:
 
@@ -354,10 +422,11 @@ def handle_multimodal(intent, request, target_files):
             audio_res = handle_audio(Intent.AUDIO_SUMMARIZE, request, audios)
 
             result =  {
-                "docs": explanations,
+                "docs": "\n\n".join(explanation),
                 "images": image_res,
                 "audio": audio_res
             }
+            return result
 
         case Intent.COMPARE_DOCUMENTS:
 
@@ -459,32 +528,3 @@ def handle_query(request: UserRequest):
             else:
                 return handle_document(intent, request, target_files)
 
-# def answer_with_context(
-#     query: str,
-#     context: str
-# ):
-#
-#     response = HF_LLM.client.chat.completions.create(
-#         model=HF_LLM.model_name,
-#         temperature=0.2,
-#         messages=[
-#             {
-#                 "role": "system",
-#                 "content":
-#                 "Answer only from the provided context."
-#             },
-#             {
-#                 "role": "user",
-#                 "content":
-#                 f"""
-# Question:
-# {query}
-#
-# Context:
-# {context}
-# """
-#             }
-#         ]
-#     )
-#
-#     return response.choices[0].message.content
