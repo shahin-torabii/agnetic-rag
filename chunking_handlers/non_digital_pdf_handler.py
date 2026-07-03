@@ -57,7 +57,7 @@ import pytesseract
 from PIL import Image, ImageOps
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from word_handler import (
+from data_gathering import (
     Chunk, DocType, DOC_TYPE_SIGNALS, DOC_TYPE_PROFILES,
     _token_count, IMAGE_DIR,
 )
@@ -65,37 +65,28 @@ from word_handler import (
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 
-# ══════════════════════════════════════════════════════════════
-# CONSTANTS
-# ══════════════════════════════════════════════════════════════
-
-# pdfplumber: minimum chars on a page to attempt direct extraction
 MIN_CHARS_FOR_TEXT      = 20
 
-# Readability: minimum ratio of real alphabetic words
-# Below → text is garbage-encoded MRC (broken ToUnicode maps)
+
 MIN_REAL_WORD_RATIO     = 0.40
 
-# Tesseract render DPI (scale × 72).  200 DPI = scale 2.78 ≈ 3.0
+
 OCR_RENDER_SCALE        = 3.0
 
-# Tesseract mean confidence (0-100) below which we flag for VLM
 VLM_CONFIDENCE_THRESHOLD = 40.0
 
-# Smask: alpha channel mean below this = JBIG2 text mask (mostly dark ink)
+
 SMASK_MEAN_THRESHOLD    = 100
 
-# Inversion: if image mean brightness < this, page is dark-background
+
 INVERSION_THRESHOLD     = 100
 
-# Deskew: only correct if detected angle is larger than this (degrees)
+
 DESKEW_MIN_ANGLE        = 0.5
 
-# Script → Tesseract lang code.
-# Lang packs must be installed:  apt install tesseract-ocr-ara tesseract-ocr-fas etc.
 SCRIPT_TO_LANG: Dict[str, str] = {
     "Latin":      "eng",
-    "Arabic":     "ara",    # covers Persian if 'fas' not installed; prefer 'fas' for Farsi
+    "Arabic":     "ara",
     "Han":        "chi_sim",
     "Cyrillic":   "rus",
     "Devanagari": "hin",
@@ -105,8 +96,6 @@ SCRIPT_TO_LANG: Dict[str, str] = {
     "Greek":      "ell",
 }
 
-# If specific lang pack not installed, fall back to eng
-# (pytesseract will error; caught and retried with eng)
 FALLBACK_LANG = "eng"
 
 STYLE_CHUNK_PARAMS: Dict[str, Tuple[int, int]] = {
@@ -119,9 +108,6 @@ HEADING_STYLES  = {"Heading 1", "Heading 2", "Heading 3"}
 CONTEXT_WINDOW  = 3
 
 
-# ══════════════════════════════════════════════════════════════
-# DATACLASSES
-# ══════════════════════════════════════════════════════════════
 
 @dataclass
 class PdfMeta:
@@ -156,25 +142,16 @@ class ImageElement:
     flag_for_vlm:   bool      = False
 
 
-# ══════════════════════════════════════════════════════════════
-# IMAGE PREPROCESSING  (CAT 3 + CAT 4 + CAT 5)
-# ══════════════════════════════════════════════════════════════
 
-def _fix_inversion(gray: np.ndarray) -> np.ndarray:
-    """
-    If image is dark-background (white text on black),
-    invert it so Tesseract sees black text on white.
-    """
+def fix_inversion(gray: np.ndarray) -> np.ndarray:
+
     if gray.mean() < INVERSION_THRESHOLD:
         return cv2.bitwise_not(gray)
     return gray
 
 
-def _deskew(gray: np.ndarray) -> np.ndarray:
-    """
-    Detect and correct page skew using minAreaRect on thresholded content.
-    Skips correction if detected angle is below DESKEW_MIN_ANGLE.
-    """
+def deskew(gray: np.ndarray) -> np.ndarray:
+
     _, binary = cv2.threshold(gray, 0, 255,
                                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     coords = np.column_stack(np.where(binary > 0))
@@ -182,7 +159,7 @@ def _deskew(gray: np.ndarray) -> np.ndarray:
         return gray
 
     angle = cv2.minAreaRect(coords)[-1]
-    # minAreaRect returns angle in [-90, 0). Normalise to [-45, 45].
+
     if angle < -45:
         angle = 90 + angle
 
@@ -196,18 +173,13 @@ def _deskew(gray: np.ndarray) -> np.ndarray:
                            borderMode=cv2.BORDER_REPLICATE)
 
 
-def _denoise(gray: np.ndarray) -> np.ndarray:
-    """Fast non-local means denoising. h=10 is gentle; increase for heavy noise."""
+def denoise(gray: np.ndarray) -> np.ndarray:
+
     return cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
 
 
-def _binarize(gray: np.ndarray) -> np.ndarray:
-    """
-    Adaptive thresholding handles uneven illumination better than global Otsu
-    for degraded scans (shadows, folds, uneven lighting).
-    Falls back to Otsu for very clean images.
-    """
-    # Adaptive threshold: good for uneven lighting
+def binarize(gray: np.ndarray) -> np.ndarray:
+
     adaptive = cv2.adaptiveThreshold(
         gray, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -227,18 +199,15 @@ def preprocess(pil_img: Image.Image) -> Image.Image:
     Returns a clean binary PIL image ready for Tesseract.
     """
     gray = np.array(pil_img.convert("L"))
-    gray = _fix_inversion(gray)
-    gray = _denoise(gray)
-    gray = _deskew(gray)
-    gray = _binarize(gray)
+    gray = fix_inversion(gray)
+    gray = denoise(gray)
+    gray = deskew(gray)
+    gray = binarize(gray)
     return Image.fromarray(gray)
 
 
-# ══════════════════════════════════════════════════════════════
-# SCRIPT DETECTION  (CAT 4)
-# ══════════════════════════════════════════════════════════════
 
-def _detect_script(pil_img: Image.Image) -> Tuple[str, str, int]:
+def detect_script(pil_img: Image.Image) -> Tuple[str, str, int]:
     """
     Use Tesseract OSD (Orientation and Script Detection) to identify:
       - script name  (e.g. "Arabic", "Han", "Latin")
@@ -268,27 +237,14 @@ def _detect_script(pil_img: Image.Image) -> Tuple[str, str, int]:
         return "Latin", FALLBACK_LANG, 0
 
 
-def _correct_rotation(pil_img: Image.Image, degrees: int) -> Image.Image:
-    """Rotate image by detected OSD angle (counter-clockwise)."""
+def correct_rotation(pil_img: Image.Image, degrees: int) -> Image.Image:
     if degrees == 0:
         return pil_img
     return pil_img.rotate(degrees, expand=True)
 
 
-# ══════════════════════════════════════════════════════════════
-# OCR WITH REAL CONFIDENCE  (all categories)
-# ══════════════════════════════════════════════════════════════
+def run_ocr(pil_img: Image.Image, lang: str = "eng") -> Tuple[str, float]:
 
-def _run_ocr(pil_img: Image.Image, lang: str = "eng") -> Tuple[str, float]:
-    """
-    Run Tesseract and return (text, mean_confidence).
-
-    Uses image_to_data to get per-word confidence scores — much more
-    reliable than the word-ratio proxy used in the previous handler.
-    Confidence is 0–100; below VLM_CONFIDENCE_THRESHOLD → flag for VLM.
-
-    If the requested lang pack is not installed, retries with 'eng'.
-    """
     def _ocr(img, lg):
         data = pytesseract.image_to_data(
             img, lang=lg, config="--psm 6",
@@ -306,7 +262,7 @@ def _run_ocr(pil_img: Image.Image, lang: str = "eng") -> Tuple[str, float]:
     try:
         return _ocr(pil_img, lang)
     except pytesseract.TesseractError:
-        # Lang pack not installed — fall back to eng
+
         try:
             return _ocr(pil_img, FALLBACK_LANG)
         except Exception:
@@ -315,16 +271,9 @@ def _run_ocr(pil_img: Image.Image, lang: str = "eng") -> Tuple[str, float]:
         return "", 0.0
 
 
-# ══════════════════════════════════════════════════════════════
-# MRC SMASK EXTRACTION  (CAT 1)
-# ══════════════════════════════════════════════════════════════
 
-def _extract_smask(page_pdfium) -> Optional[Image.Image]:
-    """
-    For MRC/Internet Archive PDFs: extract the JBIG2 text layer
-    from the alpha channel of the large RGBA PdfImage.
-    Returns inverted greyscale (black text on white), or None.
-    """
+def extract_smask(page_pdfium) -> Optional[Image.Image]:
+
     for obj in page_pdfium.get_objects():
         if not isinstance(obj, pdfium.PdfImage):
             continue
@@ -342,21 +291,14 @@ def _extract_smask(page_pdfium) -> Optional[Image.Image]:
     return None
 
 
-def _render_page(page_pdfium, scale: float = OCR_RENDER_SCALE) -> Image.Image:
-    """Render a PDF page to PIL greyscale at the given scale."""
+def render_page(page_pdfium, scale: float = OCR_RENDER_SCALE) -> Image.Image:
+
     return page_pdfium.render(scale=scale).to_pil().convert("L")
 
 
-# ══════════════════════════════════════════════════════════════
-# TEXT HELPERS
-# ══════════════════════════════════════════════════════════════
 
-def _text_is_readable(text: str) -> bool:
-    """
-    Detect garbage-encoded MRC text (broken ToUnicode maps).
-    Example garbage: '<J>^ *O NO\\' <^'
-    Real text has ≥ MIN_REAL_WORD_RATIO of 2+-letter words.
-    """
+def text_is_readable(text: str) -> bool:
+
     if not text or len(text.strip()) < 10:
         return False
     words = text.split()
@@ -366,11 +308,8 @@ def _text_is_readable(text: str) -> bool:
     return (len(real) / len(words)) >= MIN_REAL_WORD_RATIO
 
 
-def _infer_style(line: str) -> str:
-    """
-    Heuristic heading detection from plain text lines.
-    Short + all-caps or title-case + no trailing punctuation → heading.
-    """
+def infer_style(line: str) -> str:
+
     s = line.strip()
     if not s:
         return "Normal"
@@ -382,16 +321,16 @@ def _infer_style(line: str) -> str:
     return "Normal"
 
 
-def _lines_to_elements(text: str, page: int, doc_id: str,
+def lines_to_elements(text: str, page: int, doc_id: str,
                         counter: list, stack: list,
                         source: str) -> List[TextElement]:
-    """Convert extracted text block to TextElements, updating heading stack."""
+
     elements = []
     for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
-        style = _infer_style(line)
+        style = infer_style(line)
         if style in HEADING_STYLES:
             level = int(style[-1])
             stack[:] = stack[:level - 1]
@@ -405,7 +344,7 @@ def _lines_to_elements(text: str, page: int, doc_id: str,
     return elements
 
 
-def _save_page_image(img: Image.Image, doc_id: str,
+def save_page_image(img: Image.Image, doc_id: str,
                      page_num: int, image_dir: str) -> str:
     os.makedirs(image_dir, exist_ok=True)
     path = os.path.join(image_dir, f"page_{page_num}.png")
@@ -413,7 +352,7 @@ def _save_page_image(img: Image.Image, doc_id: str,
     return path
 
 
-def _add_context_windows(body_elements: list, window: int = CONTEXT_WINDOW):
+def add_context_windows(body_elements: list, window: int = CONTEXT_WINDOW):
     for idx, el in enumerate(body_elements):
         if not isinstance(el, ImageElement):
             continue
@@ -432,11 +371,8 @@ def _add_context_windows(body_elements: list, window: int = CONTEXT_WINDOW):
         el.context_after  = after
 
 
-# ══════════════════════════════════════════════════════════════
-# STEP 1 — OCR PIPELINE PER PAGE
-# ══════════════════════════════════════════════════════════════
 
-def _ocr_image(img_pil: Image.Image) -> Tuple[str, float]:
+def ocr_image(img_pil: Image.Image) -> Tuple[str, float]:
     """
     Full OCR pipeline for a single page image.
     Handles CAT 2 (clean), CAT 3 (degraded), CAT 4 (non-Latin).
@@ -449,22 +385,22 @@ def _ocr_image(img_pil: Image.Image) -> Tuple[str, float]:
       5. If confidence still low, retry with preprocessed image
     """
     # Step 1: detect script and rotation
-    script, lang, rotate = _detect_script(img_pil)
+    script, lang, rotate = detect_script(img_pil)
 
     # Step 2: fix rotation
-    img_pil = _correct_rotation(img_pil, rotate)
+    img_pil = correct_rotation(img_pil, rotate)
 
     # Step 3: preprocess
     img_preprocessed = preprocess(img_pil)
 
     # Step 4: OCR on preprocessed
-    text, conf = _run_ocr(img_preprocessed, lang=lang)
+    text, conf = run_ocr(img_preprocessed, lang=lang)
 
-    # Step 5: if confidence is poor, also try raw (sometimes preprocessing hurts clean images)
+    # Step 5: if confidence is poor, also try raw
     if conf < VLM_CONFIDENCE_THRESHOLD:
         raw_gray = np.array(img_pil.convert("L"))
-        raw_gray = _fix_inversion(raw_gray)
-        text_raw, conf_raw = _run_ocr(Image.fromarray(raw_gray), lang=lang)
+        raw_gray = fix_inversion(raw_gray)
+        text_raw, conf_raw = run_ocr(Image.fromarray(raw_gray), lang=lang)
         if conf_raw > conf:
             text, conf = text_raw, conf_raw
 
@@ -515,45 +451,40 @@ def extract_pages(pdf_path: str) -> Tuple[List, PdfMeta]:
                 # ── CAT 1 FAST PATH: pdfplumber readable ─────
                 if has_text:
                     raw = pl_page.extract_text() or ""
-                    if _text_is_readable(raw):
-                        els = _lines_to_elements(
+                    if text_is_readable(raw):
+                        els = lines_to_elements(
                             raw, page_num, doc_id, counter,
                             section_stack, source="pdfplumber"
                         )
                         body_elements.extend(els)
                         continue
-                    # else: chars present but garbage → fall through to OCR
 
-                # ── Get pdfium page for rendering / smask ─────
                 pdfium_page = pdf_pdfium[page_idx]
 
-                # ── CAT 1 FALLBACK: try smask ─────────────────
-                smask = _extract_smask(pdfium_page)
+                smask = extract_smask(pdfium_page)
                 if smask:
-                    text, conf = _run_ocr(smask, lang="eng")
+                    text, conf = run_ocr(smask, lang="eng")
                     if conf >= VLM_CONFIDENCE_THRESHOLD and text.strip():
-                        els = _lines_to_elements(
+                        els = lines_to_elements(
                             text, page_num, doc_id, counter,
                             section_stack, source="tesseract_smask"
                         )
                         body_elements.extend(els)
                         continue
 
-                # ── CAT 2/3/4/5: full OCR pipeline ───────────
-                rendered = _render_page(pdfium_page)
-                text, conf = _ocr_image(rendered)
+                rendered = render_page(pdfium_page)
+                text, conf = ocr_image(rendered)
 
                 if conf >= VLM_CONFIDENCE_THRESHOLD and text.strip():
-                    els = _lines_to_elements(
+                    els = lines_to_elements(
                         text, page_num, doc_id, counter,
                         section_stack, source="tesseract"
                     )
                     body_elements.extend(els)
 
                 else:
-                    # CAT 5 / truly messy — save page image and flag for VLM
                     image_counter += 1
-                    img_path = _save_page_image(
+                    img_path = save_page_image(
                         rendered, doc_id, page_num, doc_image_dir
                     )
                     body_elements.append(ImageElement(
@@ -572,15 +503,12 @@ def extract_pages(pdf_path: str) -> Tuple[List, PdfMeta]:
     finally:
         pdf_pdfium.close()
 
-    _add_context_windows(body_elements)
+    add_context_windows(body_elements)
     return body_elements, pdf_meta
 
 
-# ══════════════════════════════════════════════════════════════
-# STEP 2 — CLASSIFY
-# ══════════════════════════════════════════════════════════════
 
-def _classify_pdf(meta: PdfMeta, body_elements: list) -> DocType:
+def classify_pdf(meta: PdfMeta, body_elements: list) -> DocType:
     high    = meta.title.lower()
     sample  = " ".join(e.text for e in body_elements[:20]
                        if isinstance(e, TextElement)).lower()
@@ -599,18 +527,15 @@ def _classify_pdf(meta: PdfMeta, body_elements: list) -> DocType:
     return best if scores[best] > 0 else DocType.GENERAL
 
 
-# ══════════════════════════════════════════════════════════════
-# STEP 3 — CHUNKING
-# ══════════════════════════════════════════════════════════════
 
-def _pick_chunk_params(style: str, doc_type: DocType) -> Tuple[int, int]:
+def pick_chunk_params(style: str, doc_type: DocType) -> Tuple[int, int]:
     profile = DOC_TYPE_PROFILES.get(doc_type, {})
     if style in profile:
         return profile[style]
     return STYLE_CHUNK_PARAMS.get(style, (500, 75))
 
 
-def _build_section_text(elements: List[TextElement]) -> str:
+def build_section_text(elements: List[TextElement]) -> str:
     MARKERS = {1: "[SECTION]", 2: "[SUBSECTION]", 3: "[SUBSUBSECTION]"}
     lines, last = [], None
     for el in elements:
@@ -641,7 +566,6 @@ def split_and_chunk(
     while i < len(body_elements):
         el = body_elements[i]
 
-        # ── IMAGE / VLM-PENDING ───────────────────────────────
         if isinstance(el, ImageElement):
             prefix = " > ".join(el.section_path) or f"Page {el.page}"
 
@@ -671,7 +595,6 @@ def split_and_chunk(
             chunk_index += 1
             i += 1
 
-        # ── TEXT ──────────────────────────────────────────────
         elif isinstance(el, TextElement):
             section_els: List[TextElement] = []
             while i < len(body_elements) and isinstance(body_elements[i], TextElement):
@@ -681,7 +604,6 @@ def split_and_chunk(
                 section_els.append(cur)
                 i += 1
 
-            # Split at every heading boundary
             sub_groups: List[List[TextElement]] = []
             current: List[TextElement] = []
             for elem in section_els:
@@ -701,8 +623,8 @@ def split_and_chunk(
                     last_heading.section_path if last_heading
                     else group[-1].section_path
                 )
-                section_text  = _build_section_text(group)
-                size, overlap = _pick_chunk_params(dominant_style, doc_type)
+                section_text  = build_section_text(group)
+                size, overlap = pick_chunk_params(dominant_style, doc_type)
 
                 if _token_count(section_text) <= size:
                     chunks.append(Chunk(
@@ -736,9 +658,6 @@ def split_and_chunk(
     return chunks, image_to_chunks, table_to_chunks
 
 
-# ══════════════════════════════════════════════════════════════
-# PUBLIC ENTRY POINT
-# ══════════════════════════════════════════════════════════════
 
 def process_scanned_pdf(pdf_path: str):
     """
@@ -760,18 +679,15 @@ def process_scanned_pdf(pdf_path: str):
         # route vlm_chunks to your VLM pipeline when budget allows
     """
     body_elements, pdf_meta = extract_pages(pdf_path)
-    doc_type                = _classify_pdf(pdf_meta, body_elements)
+    doc_type                = classify_pdf(pdf_meta, body_elements)
     pdf_meta.doc_type       = doc_type.value
     chunks, img_idx, tbl_idx = split_and_chunk(body_elements, pdf_meta, doc_type)
     return chunks, pdf_meta, img_idx, tbl_idx
 
 
-# ══════════════════════════════════════════════════════════════
-# TEST
-# ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    import sys
+
     path = r"C:\Users\shahin\Desktop\jozve.pdf"
 
 
