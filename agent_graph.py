@@ -87,3 +87,47 @@ def router_node(state:AgentState) -> AgentState:
     
     return state
 
+
+def context_node(state:AgentState) -> AgentState:
+
+    manage_active_context(state.request)
+    handle_uploads(state.request)
+    return state
+
+
+def resolver_node(state: AgentState) -> AgentState:
+    state.target_files = resolve(state.request)
+    return state
+
+
+def dispatcher_node(state: AgentState) -> AgentState:
+    return state
+
+
+def dispatch_branch(state: AgentState) -> str:
+
+    intent = state.intent
+    request = state.request
+
+    INTENT_ROUTE = {
+        Intent.IMAGE_SEARCH: "image",
+        Intent.IMAGE_UNDERSTANDING: "image",
+
+        Intent.AUDIO_QA: "audio",
+        Intent.AUDIO_SUMMARIZE: "audio",
+        Intent.AUDIO_TRANSCRIBE: "audio",
+        Intent.AUDIO_OVERVIEW: "audio",
+
+        Intent.GENERAL_CHAT: "general",
+        Intent.UNKNOWN: "general",
+    }
+
+    route = INTENT_ROUTE.get(intent)
+
+    if route:
+        return route
+
+    if request.audio or request.images:
+        return "multimodal"
+
+    return "document"
