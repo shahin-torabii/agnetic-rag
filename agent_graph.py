@@ -31,6 +31,7 @@ class AgentState:
     retry_count: int = 0
     rewritten_query: Optional[str] = None
 
+MAX_RETRIES = 3
 
 def pick_k(intent: Intent) -> int:
     if intent in (Intent.DOCUMENT_QA, Intent.SEARCH_DOCUMENT):
@@ -173,3 +174,63 @@ def general_node(state: AgentState) -> AgentState:
     except Exception as e:
         state.error = str(e)
     return state
+
+
+EVALUATION_PROMPT = """
+You are evaluating the quality of an AI response.
+
+Determine whether the response adequately satisfies the request.
+
+Return only one word.
+Return ONLY one of:
+
+PASS
+FAIL
+"""
+eval_prompt = ChatPromptTemplate.from_messages([
+        ("system", EVALUATION_PROMPT),
+        ("human", "User Request:{query} \n\n User Intent:{intent}\n\n Generated Response:{response}")
+    ])
+evaluator_chain = eval_prompt | HF_LLM.fast_llm.bind(max_tokens=30, temprature=0) | StrOutputParser()
+
+REWRITER_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """Rewrite unclear original queries to be broader, stronger and clearer for the specific intent the user wants 
+               Return ONLY the rewritten query."""),
+    ("human", "Original query: {query} \n\n Intent:{intent}")
+])
+
+rewrite_chain = REWRITER_PROMPT | HF_LLM.fast_llm.bind(max_tokens=70) | StrOutputParser()
+
+
+def is_result_weak(intent: Intent, result:Any, query:str)-> bool:
+
+    if result is None:
+        return True
+
+    if isinstance(result, (list, tuple, str)) and len(result) == 0:
+        return True
+
+
+
+    verdict = evaluator_chain.invoke({"query": query, "intent":intent, "response": result})
+
+    return verdict.lower().strip() == "fail"
+
+
+
+
+def reflect_node(state: AgentState) -> AgentState:
+    if (state.retry_count < MAX_RETRIES
+       and (state.error or is_result_weak(state.intent, state.result, state.request.query))):
+        state.retry_count += 1
+        state.rewritten_query = rewrite_chain.invoke({"query": state.request.query, "intent": state.intent})
+
+    return state
+
+
+def reflect_branch(state: AgentState) -> str:
+    if state.rewritten_query:
+        state.rewritten_query =None
+        return  "retry"
+
+    return "done"
