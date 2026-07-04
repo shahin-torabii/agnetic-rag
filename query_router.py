@@ -8,6 +8,7 @@ from typing import  Set, Dict
 from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from functools import lru_cache
 
 
 class Intent(str, Enum):
@@ -97,12 +98,6 @@ Rules:
 - No explanation, no markdown, no extra text.
 - Classify ONLY the user intent, not chunking/retrieval/summarization strategy."""
 
-router_prompt = ChatPromptTemplate.from_messages([
-    ("system", ROUTER_SYSTEM_PROMPT),
-    ("human", "Query: {query}\n\nContext:\n{context}"),
-])
-
-router_chain = router_prompt | HF_LLM.fast_llm.bind(max_tokens=20, temperature=0) | StrOutputParser()
 
 
 FA_EXPLAIN = [
@@ -264,6 +259,18 @@ FA_AUDIO_SUMMARIZE = [
 ]
 
 
+@lru_cache(maxsize=1)
+def get_router_chain():
+    router_prompt = ChatPromptTemplate.from_messages([
+        ("system", ROUTER_SYSTEM_PROMPT),
+        ("human", "Query: {query}\n\nContext:\n{context}"),
+    ])
+
+    router_chain = router_prompt | HF_LLM.fast_llm.bind(max_tokens=20, temperature=0) | StrOutputParser()
+
+    return router_chain
+
+
 def contains_any(query: str, keywords: list[str]) -> bool:
     query = query.lower().strip()
 
@@ -407,7 +414,7 @@ num_documents: {ctx.num_documents}
 num_images: {ctx.num_images}
 num_audio: {ctx.num_audio}"""
 
-    raw = router_chain.invoke({"query": query, "context": context_text})
+    raw = get_router_chain().invoke({"query": query, "context": context_text})
     query_class = raw.strip().split()[0].replace(".", "")
 
     try:

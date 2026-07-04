@@ -47,13 +47,6 @@ Output: database connection error, database connectivity issue, connection failu
 Query: first step of installation
 Output: first step of installation, installation beginning, setup start, initial installation step, step one"""
 
-improve_query_prompt = ChatPromptTemplate.from_messages([
-    ("system", IMPROVE_QUERY_SYSTEM_PROMPT),
-    ("human", "User Query: {query}\n\nOptimized Search Query (Output only the terms):"),
-])
-
-improve_query_chain = improve_query_prompt | HF_LLM.fast_llm | StrOutputParser()
-
 
 SERVER_URL = "http://127.0.0.1:8000"
 
@@ -77,7 +70,16 @@ STRUCTURAL_TERMS = {
 }
 
 
+@lru_cache(maxsize=1)
+def get_improve_query_chain():
+    improve_query_prompt = ChatPromptTemplate.from_messages([
+        ("system", IMPROVE_QUERY_SYSTEM_PROMPT),
+        ("human", "User Query: {query}\n\nOptimized Search Query (Output only the terms):"),
+    ])
 
+    improve_query_chain = improve_query_prompt | HF_LLM.fast_llm | StrOutputParser()
+
+    return improve_query_chain
 
 
 def search_text(query: str, k: int = 5, oversample_factor: int = 4) -> List[dict]:
@@ -238,7 +240,7 @@ def improve_query(query: str) -> str:
     Cached — same query string won't trigger a second LLM call
     within the same session.
     """
-    return improve_query_chain.invoke({"query": query}).strip()
+    return get_improve_query_chain().invoke({"query": query}).strip()
 
 
 def is_structural_query(query: str) -> bool:

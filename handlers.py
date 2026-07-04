@@ -225,7 +225,6 @@ def overview_func(chunks, meta=None, batch_size_tokens=TOKENS_PER_BATCH):
     return partials[0] if len(partials) == 1 else overview_final(partials, meta=meta)
 
 
-# {query} is a named placeholder here -- not baked into the string beforehand.
 EXPLAIN_PARTIAL_WITH_QUERY_TEMPLATE = """You are a teaching assistant.
 
 Explain ONLY the content relevant to:

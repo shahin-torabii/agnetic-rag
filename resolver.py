@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from LLM import HF_LLM
 from query_router import ActiveContext
 from dataclasses import dataclass, field
@@ -32,12 +34,6 @@ Schema:
 }}"""
 
 
-resolver_prompt = ChatPromptTemplate.from_messages([
-    ("system", REFERENCE_RESOLVER_SYSTEM_PROMPT),
-    ("human", "{user_prompt}"),
-])
-
-resolver_chain = resolver_prompt | HF_LLM.strong_llm.bind(temperature=0) | JsonOutputParser()
 
 
 CURRENT_FILE_SIGNALS = {
@@ -122,6 +118,18 @@ class ResolvedTargets:
     images: List[str] = field(default_factory=list)
 
     confidence: float = 1.0
+
+
+@lru_cache(maxsize=1)
+def get_resolver_chain():
+    resolver_prompt = ChatPromptTemplate.from_messages([
+        ("system", REFERENCE_RESOLVER_SYSTEM_PROMPT),
+        ("human", "{user_prompt}"),
+    ])
+
+    resolver_chain = resolver_prompt | HF_LLM.strong_llm.bind(temperature=0) | JsonOutputParser()
+    return resolver_chain
+
 
 
 def normalize_name(name: str) -> str:
@@ -340,7 +348,7 @@ Output:
 Return JSON only."""
 
     try:
-        parsed = resolver_chain.invoke({"user_prompt": user_prompt})
+        parsed = get_resolver_chain().invoke({"user_prompt": user_prompt})
         return ResolvedTargets(
             documents=parsed.get("documents", []),
             images=parsed.get("images", []),

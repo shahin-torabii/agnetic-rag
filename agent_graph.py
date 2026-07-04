@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Optional, Literal
 from langgraph.graph import StateGraph, END
 
@@ -41,6 +42,42 @@ Route = Literal[
     "multimodal",
     "general",
 ]
+
+
+
+EVALUATION_PROMPT = """
+You are evaluating the quality of an AI response.
+
+Determine whether the response adequately satisfies the request.
+
+Return only one word.
+Return ONLY one of:
+
+PASS
+FAIL
+"""
+
+@lru_cache(maxsize=1)
+def get_evaluator_chain():
+    eval_prompt = ChatPromptTemplate.from_messages([
+        ("system", EVALUATION_PROMPT),
+        ("human", "User Request:{query} \n\n User Intent:{intent}\n\n Generated Response:{response}")
+    ])
+    evaluator_chain = eval_prompt | HF_LLM.fast_llm.bind(max_tokens=30, temprature=0) | StrOutputParser()
+
+    return evaluator_chain
+
+@lru_cache(maxsize=1)
+def get_rewrite_chain():
+    REWRITER_PROMPT = ChatPromptTemplate.from_messages([
+        ("system", """Rewrite unclear original queries to be broader, stronger and clearer for the specific intent the user wants 
+                   Return ONLY the rewritten query."""),
+        ("human", "Original query: {query} \n\n Intent:{intent}")
+    ])
+
+    rewrite_chain = REWRITER_PROMPT | HF_LLM.fast_llm.bind(max_tokens=70) | StrOutputParser()
+
+    return rewrite_chain
 
 def pick_k(intent: Intent) -> int:
     if intent in (Intent.DOCUMENT_QA, Intent.SEARCH_DOCUMENT):
@@ -118,6 +155,7 @@ def dispatch_branch(state: AgentState) -> Route:
 
     intent = state.intent
     request = state.request
+    print("intent is:" , intent)
 
     intent_route = {
         Intent.IMAGE_SEARCH: "image",
@@ -185,32 +223,6 @@ def general_node(state: AgentState) -> AgentState:
     return state
 
 
-EVALUATION_PROMPT = """
-You are evaluating the quality of an AI response.
-
-Determine whether the response adequately satisfies the request.
-
-Return only one word.
-Return ONLY one of:
-
-PASS
-FAIL
-"""
-eval_prompt = ChatPromptTemplate.from_messages([
-        ("system", EVALUATION_PROMPT),
-        ("human", "User Request:{query} \n\n User Intent:{intent}\n\n Generated Response:{response}")
-    ])
-evaluator_chain = eval_prompt | HF_LLM.fast_llm.bind(max_tokens=30, temprature=0) | StrOutputParser()
-
-REWRITER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """Rewrite unclear original queries to be broader, stronger and clearer for the specific intent the user wants 
-               Return ONLY the rewritten query."""),
-    ("human", "Original query: {query} \n\n Intent:{intent}")
-])
-
-rewrite_chain = REWRITER_PROMPT | HF_LLM.fast_llm.bind(max_tokens=70) | StrOutputParser()
-
-
 def is_result_weak(intent: Intent, result:Any, query:str)-> bool:
 
     if result is None:
@@ -219,20 +231,16 @@ def is_result_weak(intent: Intent, result:Any, query:str)-> bool:
     if isinstance(result, (list, tuple, str)) and len(result) == 0:
         return True
 
-
-
-    verdict = evaluator_chain.invoke({"query": query, "intent":intent, "response": result})
+    verdict = get_evaluator_chain().invoke({"query": query, "intent":intent, "response": result})
 
     return verdict.lower().strip() == "fail"
-
-
 
 
 def reflect_node(state: AgentState) -> AgentState:
     if (state.retry_count < MAX_RETRIES
        and (state.error or is_result_weak(state.intent, state.result, state.request.query))):
         state.retry_count += 1
-        state.rewritten_query = rewrite_chain.invoke({"query": state.request.query, "intent": state.intent})
+        state.rewritten_query = get_rewrite_chain().invoke({"query": state.request.query, "intent": state.intent})
 
     return state
 
@@ -261,6 +269,9 @@ def build_graph():
     graph.add_node("reflect", reflect_node)
 
     graph.set_entry_point("router")
+    graph.add_edge("router", "context")
+    graph.add_edge("context", "resolver")
+    graph.add_edge("resolver", "dispatcher")
 
     graph.add_conditional_edges("dispatcher", dispatch_branch, {
         "document": "document",
@@ -282,7 +293,6 @@ def build_graph():
     })
 
     return graph.compile()
-
 
 
 def run_agent(request: UserRequest):
