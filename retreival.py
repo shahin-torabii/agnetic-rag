@@ -8,6 +8,52 @@ import numpy as np
 from LLM import HF_LLM
 import requests
 from index_embedd import embed_image
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+
+
+
+IMPROVE_QUERY_SYSTEM_PROMPT = """You are a query expansion assistant for a multilingual RAG system.
+
+Your goal is to improve retrieval recall by expanding the user's query with:
+- Synonyms
+- Alternative phrasings
+- Related technical terminology
+- Common document structure terms when appropriate
+- Sequential references (first, second, final, etc.) when appropriate
+
+Rules:
+1. Keep the original query.
+2. Preserve the original language. Never translate.
+3. Add only highly plausible alternatives.
+4. Do not invent facts or specific information.
+5. Do not answer the query.
+6. Do not explain your reasoning.
+7. Output ONLY a comma-separated list.
+8. Keep the expansion concise (typically 5-10 terms/phrases total).
+
+Examples:
+
+Query: آخرین بخش آزمایش
+Output: آخرین بخش آزمایش, بخش پایانی, بخش آخر, قسمت نهایی, مراحل نهایی, بخش دوم
+
+Query: نصب کتابخانه پایتون
+Output: نصب کتابخانه پایتون, نصب پکیج پایتون, افزودن کتابخانه, راه اندازی کتابخانه, نصب وابستگی
+
+Query: database connection error
+Output: database connection error, database connectivity issue, connection failure, database access problem
+
+Query: first step of installation
+Output: first step of installation, installation beginning, setup start, initial installation step, step one"""
+
+improve_query_prompt = ChatPromptTemplate.from_messages([
+    ("system", IMPROVE_QUERY_SYSTEM_PROMPT),
+    ("human", "User Query: {query}\n\nOptimized Search Query (Output only the terms):"),
+])
+
+improve_query_chain = improve_query_prompt | HF_LLM.fast_llm | StrOutputParser()
+
 
 SERVER_URL = "http://127.0.0.1:8000"
 
@@ -186,58 +232,13 @@ def rerank(query: str, chunks: List[dict],
     return [r for r in reranked if r["score"] > threshold][:top_k]
 
 
-
 @lru_cache(maxsize=256)
 def improve_query(query: str) -> str:
     """
     Cached — same query string won't trigger a second LLM call
     within the same session.
     """
-    system_prompt = f"""
-        You are a query expansion assistant for a multilingual RAG system.
-
-        Your goal is to improve retrieval recall by expanding the user's query with:
-        - Synonyms
-        - Alternative phrasings
-        - Related technical terminology
-        - Common document structure terms when appropriate
-        - Sequential references (first, second, final, etc.) when appropriate
-
-        Rules:
-        1. Keep the original query.
-        2. Preserve the original language. Never translate.
-        3. Add only highly plausible alternatives.
-        4. Do not invent facts or specific information.
-        5. Do not answer the query.
-        6. Do not explain your reasoning.
-        7. Output ONLY a comma-separated list.
-        8. Keep the expansion concise (typically 5-10 terms/phrases total).
-
-        Examples:
-
-        Query: آخرین بخش آزمایش
-        Output: آخرین بخش آزمایش, بخش پایانی, بخش آخر, قسمت نهایی, مراحل نهایی, بخش دوم
-
-        Query: نصب کتابخانه پایتون
-        Output: نصب کتابخانه پایتون, نصب پکیج پایتون, افزودن کتابخانه, راه اندازی کتابخانه, نصب وابستگی
-
-        Query: database connection error
-        Output: database connection error, database connectivity issue, connection failure, database access problem
-
-        Query: first step of installation
-        Output: first step of installation, installation beginning, setup start, initial installation step, step one
-
-        User Query: {query}
-
-        Optimized Search Query (Output only the terms):
-    """
-
-    result = HF_LLM.client.chat.completions.create(
-        model=HF_LLM.model_name,
-        messages=[{"role": "system", "content": system_prompt}]
-    )
-    return result.choices[0].message.content
-
+    return improve_query_chain.invoke({"query": query}).strip()
 
 
 def is_structural_query(query: str) -> bool:

@@ -1,5 +1,5 @@
 import os
-from openai import OpenAI
+from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import base64
 
@@ -9,6 +9,9 @@ class HF_LLM:
     api_key = None
     #base_url="https://router.huggingface.co/v1"
     client = None
+    strong_llm = None
+    fast_llm = None
+    vision_llm  = None
 
     strong_model_name = "qwen/qwen3-8b"
     fast_model_name = "qwen/qwen-2.5-7b-instruct"
@@ -28,14 +31,28 @@ def load_api_key():
     HF_LLM.api_key = open_router_api_key
 
 
-def creat_HF_client():
+def create_HF_client():
     set_environ()
     load_api_key()
-    hf_client = OpenAI(
+
+    HF_LLM.strong_llm = ChatOpenAI(
+        model=HF_LLM.strong_model_name,
         api_key=HF_LLM.api_key,
-        base_url=HF_LLM.base_url
+        base_url=HF_LLM.base_url,
+        temperature=0,
     )
-    HF_LLM.client = hf_client
+    HF_LLM.fast_llm = ChatOpenAI(
+        model=HF_LLM.fast_model_name,
+        api_key=HF_LLM.api_key,
+        base_url=HF_LLM.base_url,
+        temperature=0,
+    )
+    HF_LLM.vision_llm = ChatOpenAI(
+        model=HF_LLM.vision_model_name,
+        api_key=HF_LLM.api_key,
+        base_url=HF_LLM.base_url,
+        temperature=0.2,
+    )
 
 
 def encode_image_to_base64(image_path):
@@ -45,13 +62,13 @@ def encode_image_to_base64(image_path):
 def initialize_hf_llm():
     set_environ()
     load_api_key()
-    creat_HF_client()
+    create_HF_client()
 
 if __name__ == "__main__":
 
     set_environ()
     load_api_key()
-    client = OpenAI(
+    client = ChatOpenAI(
         base_url=HF_LLM.base_url,
         api_key=HF_LLM.api_key
     )

@@ -6,9 +6,38 @@ from data_gathering import Data, UserRequest
 import json
 from rapidfuzz import fuzz
 from pathlib import Path
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 
 
+REFERENCE_RESOLVER_SYSTEM_PROMPT = """You are a file reference resolver.
 
+Your task:
+Determine which files the user is referring to.
+
+The user may refer to:
+- currently uploaded files
+- previously uploaded files
+- both
+
+You may ONLY return files that exist in the provided candidate lists.
+
+Return ONLY valid JSON.
+
+Schema:
+{{
+  "documents": [],
+  "images": [],
+  "confidence": 0.0
+}}"""
+
+
+resolver_prompt = ChatPromptTemplate.from_messages([
+    ("system", REFERENCE_RESOLVER_SYSTEM_PROMPT),
+    ("human", "{user_prompt}"),
+])
+
+resolver_chain = resolver_prompt | HF_LLM.strong_llm.bind(temperature=0) | JsonOutputParser()
 
 
 CURRENT_FILE_SIGNALS = {
@@ -267,50 +296,17 @@ def build_candidate_context():
     return docs
 
 
-def llm_reference_resolver(
-    query: str
-) -> ResolvedTargets:
-
+def llm_reference_resolver(query: str) -> ResolvedTargets:
     candidates = build_candidate_context()
 
     current_uploads = {
         "documents": list(
-            ActiveContext.active_documents +  ActiveContext.active_audio
+            ActiveContext.active_documents | ActiveContext.active_audio
         ),
-        "images": list(
-            ActiveContext.active_images
-        ),
-
+        "images": list(ActiveContext.active_images),
     }
 
-    system_prompt = """
-You are a file reference resolver.
-
-Your task:
-
-Determine which files the user is referring to.
-
-The user may refer to:
-
-- currently uploaded files
-- previously uploaded files
-- both
-
-You may ONLY return files that exist in the provided candidate lists.
-
-Return ONLY valid JSON.
-
-Schema:
-
-{
-  "documents": [],
-  "images": [],
-  "confidence": 0.0
-}
-"""
-
-    user_prompt = f"""
-User Query:
+    user_prompt = f"""User Query:
 {query}
 
 Current Uploads:
@@ -341,45 +337,17 @@ Output:
   "confidence": 0.9
 }}
 
-Return JSON only.
-"""
-
-    response = HF_LLM.client.chat.completions.create(
-        model=HF_LLM.model_name,
-        temperature=0,
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": user_prompt
-            }
-        ]
-    )
-
-    content = response.choices[0].message.content
+Return JSON only."""
 
     try:
-
-        parsed = json.loads(content)
-
+        parsed = resolver_chain.invoke({"user_prompt": user_prompt})
         return ResolvedTargets(
-            documents=parsed.get(
-                "documents",
-                []
-            ),
-            images=parsed.get(
-                "images",
-                []
-            ),
-
-            confidence=parsed.get(
-                "confidence",
-                0.0
-            )
+            documents=parsed.get("documents", []),
+            images=parsed.get("images", []),
+            confidence=parsed.get("confidence", 0.0),
         )
+    except Exception:
+        return ResolvedTargets(confidence=0.0)
 
     except Exception:
 

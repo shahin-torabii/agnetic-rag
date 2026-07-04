@@ -4,8 +4,10 @@ from data_gathering import UserRequest
 from LLM import HF_LLM
 from data_gathering import Data
 from index_embedd import VectorStore
-from typing import List, Set, Dict
+from typing import  Set, Dict
 from pathlib import Path
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 
 class Intent(str, Enum):
@@ -69,6 +71,38 @@ class ActiveContext:
 
     active_files_chunks :Dict[str, dict] = {"document": {}, "audio":{}}
 
+
+ROUTER_SYSTEM_PROMPT = """You are an intent classifier for a multimodal RAG system.
+
+Classify the request into EXACTLY ONE of the following classes:
+
+GENERAL_CHAT
+DOCUMENT_OVERVIEW
+DOCUMENT_QA
+DOCUMENT_SECTION_EXPLAIN
+DOCUMENT_FULL_EXPLAIN
+DOCUMENT_SUMMARIZE
+IMAGE_UNDERSTANDING
+IMAGE_SEARCH
+AUDIO_OVERVIEW
+AUDIO_TRANSCRIBE
+AUDIO_SUMMARIZE
+AUDIO_QA
+SEARCH_DOCUMENT
+COMPARE_DOCUMENTS
+DOCUMENT_ACTION
+
+Rules:
+- Return ONLY the class name.
+- No explanation, no markdown, no extra text.
+- Classify ONLY the user intent, not chunking/retrieval/summarization strategy."""
+
+router_prompt = ChatPromptTemplate.from_messages([
+    ("system", ROUTER_SYSTEM_PROMPT),
+    ("human", "Query: {query}\n\nContext:\n{context}"),
+])
+
+router_chain = router_prompt | HF_LLM.fast_llm.bind(max_tokens=20, temperature=0) | StrOutputParser()
 
 
 FA_EXPLAIN = [
@@ -363,90 +397,23 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
 
 
 def llm_router(query: str, ctx) -> Intent:
+    context_text = f"""has_image: {ctx.has_image}
+has_document: {ctx.has_document}
+has_audio: {ctx.has_audio}
+has_stored_documents: {ctx.has_stored_documents}
+has_stored_images: {ctx.has_stored_images}
+has_stored_audio: {ctx.has_stored_audio}
+num_documents: {ctx.num_documents}
+num_images: {ctx.num_images}
+num_audio: {ctx.num_audio}"""
 
-
-    client = HF_LLM.client
-    model_name = "Qwen/Qwen3-4B-Instruct-2507"
-
-    system_prompt = """
-You are an intent classifier for a multimodal RAG system.
-
-Classify the request into EXACTLY ONE of the following classes:
-
-GENERAL_CHAT
-
-DOCUMENT_OVERVIEW
-DOCUMENT_QA
-DOCUMENT_SECTION_EXPLAIN
-DOCUMENT_FULL_EXPLAIN
-DOCUMENT_SUMMARIZE
-
-IMAGE_UNDERSTANDING
-IMAGE_SEARCH
-
-AUDIO_OVERVIEW
-AUDIO_TRANSCRIBE
-AUDIO_SUMMARIZE
-AUDIO_QA
-
-SEARCH_DOCUMENT
-
-COMPARE_DOCUMENTS
-
-DOCUMENT_ACTION
-
-Rules:
-
-- Return ONLY the class name.
-- No explanation.
-- No markdown.
-- No extra text.
--Classify ONLY the user intent.
-Do not decide:
-- chunking
-- retrieval strategy
-- summarization strategy
-- document size handling
-"""
-
-
-    user_prompt = f"""
-    Query: {query}
-
-    Context:
-
-    has_image: {ctx.has_image}
-    has_document: {ctx.has_document}
-    has_audio: {ctx.has_audio}
-
-    has_stored_documents: {ctx.has_stored_documents}
-    has_stored_images: {ctx.has_stored_images}
-    has_stored_audio: {ctx.has_stored_audio}
-
-    num_documents: {ctx.num_documents}
-    num_images: {ctx.num_images}
-    num_audio: {ctx.num_audio}
-    """
-
-    response = client.chat.completions.create(
-        model=model_name,
-        temperature=0,
-        max_tokens=20,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-
-    query_class = response.choices[0].message.content.strip().split()[0].replace(".", "")
+    raw = router_chain.invoke({"query": query, "context": context_text})
+    query_class = raw.strip().split()[0].replace(".", "")
 
     try:
-        intent = Intent(query_class)
+        return Intent(query_class)
     except ValueError:
-        intent = Intent.GENERAL_CHAT
-
-    return intent
-
+        return Intent.GENERAL_CHAT
 
 
 def route_query(request: UserRequest):
@@ -548,8 +515,6 @@ def manage_active_context(request:UserRequest):
         if has_docs:
             docs = [Path(doc).name for doc in request.documents]
             ActiveContext.active_documents.update(docs)
-
-
 
 
 def handle_request(request: UserRequest):

@@ -9,10 +9,11 @@ from chunking_handlers.word_handler import process_docx
 from chunking_handlers.pp_handler import process_pptx
 from chunking_handlers.excel_handler import process_excel
 import puremagic
-from data_gathering import Data
 from handlers import *
 from resolver import resolve
 from typing import List
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 AUDIO_TRANSCRIPT = None
 
