@@ -1,5 +1,5 @@
-from dataclasses import dataclass, Field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any, Optional, Literal
 from langgraph.graph import StateGraph, END
 
 from index_embedd import VectorStore
@@ -32,6 +32,15 @@ class AgentState:
     rewritten_query: Optional[str] = None
 
 MAX_RETRIES = 3
+
+
+Route = Literal[
+    "document",
+    "image",
+    "audio",
+    "multimodal",
+    "general",
+]
 
 def pick_k(intent: Intent) -> int:
     if intent in (Intent.DOCUMENT_QA, Intent.SEARCH_DOCUMENT):
@@ -105,12 +114,12 @@ def dispatcher_node(state: AgentState) -> AgentState:
     return state
 
 
-def dispatch_branch(state: AgentState) -> str:
+def dispatch_branch(state: AgentState) -> Route:
 
     intent = state.intent
     request = state.request
 
-    INTENT_ROUTE = {
+    intent_route = {
         Intent.IMAGE_SEARCH: "image",
         Intent.IMAGE_UNDERSTANDING: "image",
 
@@ -123,7 +132,7 @@ def dispatch_branch(state: AgentState) -> str:
         Intent.UNKNOWN: "general",
     }
 
-    route = INTENT_ROUTE.get(intent)
+    route = intent_route.get(intent)
 
     if route:
         return route
@@ -234,3 +243,50 @@ def reflect_branch(state: AgentState) -> str:
         return  "retry"
 
     return "done"
+
+#################### Build Graph  ############################
+def build_graph():
+
+    graph = StateGraph(AgentState)
+
+    graph.add_node("router", router_node)
+    graph.add_node("context", context_node)
+    graph.add_node("resolver", resolver_node)
+    graph.add_node("dispatcher", dispatcher_node)
+    graph.add_node("document", document_node)
+    graph.add_node("image", image_node)
+    graph.add_node("audio", audio_node)
+    graph.add_node("multimodal", multimodal_node)
+    graph.add_node("general", general_node)
+    graph.add_node("reflect", reflect_node)
+
+    graph.set_entry_point("router")
+
+    graph.add_conditional_edges("dispatcher", dispatch_branch, {
+        "document": "document",
+        "image": "image",
+        "audio": "audio",
+        "multimodal": "multimodal",
+        "general": "general",
+    })
+
+    graph.add_edge("document", "reflect")
+    graph.add_edge("multimodal", "reflect")
+    graph.add_edge("image", "reflect")
+    graph.add_edge("audio", "reflect")
+    graph.add_edge("general", "reflect")
+
+    graph.add_conditional_edges("reflect", reflect_branch,{
+        "retry": "resolver",
+        "done":END
+    })
+
+    return graph.compile()
+
+
+
+def run_agent(request: UserRequest):
+    app = build_graph()
+    final_state = app.invoke(AgentState(request=request))
+    result = final_state["result"] if isinstance(final_state, dict) else final_state.result
+    return result
