@@ -246,6 +246,7 @@ def is_structural_query(query: str) -> bool:
     return any(term.lower() in q for term in STRUCTURAL_TERMS)
 
 
+
 def _chunk_to_dict(chunk) -> dict:
     return {
         "text":         chunk.text,
