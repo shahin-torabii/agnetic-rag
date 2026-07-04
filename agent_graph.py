@@ -131,3 +131,45 @@ def dispatch_branch(state: AgentState) -> str:
         return "multimodal"
 
     return "document"
+
+
+def document_node(state: AgentState) -> AgentState:
+    try:
+        state.result = handle_document(state.intent, state.request, state.target_files, k=state.k)
+        state.error = None
+    except Exception as e:
+        state.error = str(e)
+    return state
+
+
+def image_node(state: AgentState) -> AgentState:
+    try:
+        state.result = handle_image(state.intent, state.request, state.target_files)
+    except Exception as e:
+        state.error = str(e)
+    return state
+
+
+def audio_node(state: AgentState) -> AgentState:
+    try:
+        state.result = handle_audio(state.intent, state.request, state.target_files)
+    except Exception as e:
+        state.error = str(e)
+    return state
+
+
+def multimodal_node(state: AgentState) -> AgentState:
+    try:
+        state.result = handle_multimodal(state.intent, state.request, state.target_files, k=state.k)
+        state.error = None
+    except Exception as e:
+        state.error = str(e)
+    return state
+
+
+def general_node(state: AgentState) -> AgentState:
+    try:
+        state.result = handle_general(state.intent, state.request)
+    except Exception as e:
+        state.error = str(e)
+    return state
