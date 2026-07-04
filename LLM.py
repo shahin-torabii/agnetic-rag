@@ -7,16 +7,24 @@ class HF_LLM:
     # model_name = "Qwen/Qwen3-4B-Instruct-2507"
     # vision_model_name = "Qwen/Qwen3-VL-8B-Instruct"
     api_key = None
-    #base_url="https://router.huggingface.co/v1"
+
     client = None
     strong_llm = None
     fast_llm = None
     vision_llm  = None
 
-    strong_model_name = "qwen/qwen3-8b"
-    fast_model_name = "qwen/qwen-2.5-7b-instruct"
-    vision_model_name = "qwen/qwen3-vl-8b-instruct"
-    base_url = "https://openrouter.ai/api/v1"
+    # vision_model_name = "Qwen/Qwen3-VL-8B-Instruct"
+    #vision_model_name =  "meta-llama/Llama-3.2-11B-Vision-Instruct"
+    vision_model_name = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+    fast_model_name= "Qwen/Qwen2.5-7B-Instruct"
+    strong_model_name = "google/gemma-4-31b-it:free"
+    base_url="https://router.huggingface.co/v1"
+
+
+    # strong_model_name = "qwen/qwen3-8b"
+    # fast_model_name = "qwen/qwen-2.5-7b-instruct"
+    # vision_model_name = "qwen/qwen3-vl-8b-instruct"
+    # base_url = "https://openrouter.ai/api/v1"
 
 
 def set_environ():
@@ -28,7 +36,7 @@ def load_api_key():
     load_dotenv()
     hf_api_key = os.getenv("HUGGIN_FACE_API")
     open_router_api_key = os.getenv("OPEN_ROUter_API_KEY")
-    HF_LLM.api_key = open_router_api_key
+    HF_LLM.api_key = hf_api_key
 
 
 def create_HF_client():

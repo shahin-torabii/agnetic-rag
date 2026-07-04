@@ -155,7 +155,7 @@ def dispatch_branch(state: AgentState) -> Route:
 
     intent = state.intent
     request = state.request
-    print("intent is:" , intent)
+
 
     intent_route = {
         Intent.IMAGE_SEARCH: "image",
@@ -182,10 +182,13 @@ def dispatch_branch(state: AgentState) -> Route:
 
 
 def document_node(state: AgentState) -> AgentState:
+    print("enter document")
     try:
         state.result = handle_document(state.intent, state.request, state.target_files, k=state.k)
+        print(state.result)
         state.error = None
     except Exception as e:
+        print(e)
         state.error = str(e)
     return state
 
@@ -237,17 +240,19 @@ def is_result_weak(intent: Intent, result:Any, query:str)-> bool:
 
 
 def reflect_node(state: AgentState) -> AgentState:
+
+    state.rewritten_query = None
     if (state.retry_count < MAX_RETRIES
        and (state.error or is_result_weak(state.intent, state.result, state.request.query))):
         state.retry_count += 1
         state.rewritten_query = get_rewrite_chain().invoke({"query": state.request.query, "intent": state.intent})
+        state.request.query = state.rewritten_query
 
     return state
 
 
 def reflect_branch(state: AgentState) -> str:
     if state.rewritten_query:
-        state.rewritten_query =None
         return  "retry"
 
     return "done"

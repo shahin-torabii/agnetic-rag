@@ -147,7 +147,7 @@ def resolve_ordinals(query: str) -> list[str]:
     q = query.lower()
 
     active_docs = list(
-        ActiveContext.active_documents + ActiveContext.active_audio
+        ActiveContext.active_documents.union(ActiveContext.active_audio)
     )
 
     matched = []
