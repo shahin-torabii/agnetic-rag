@@ -64,8 +64,10 @@ def get_evaluator_chain():
         ("human", "User Request:{query} \n\n User Intent:{intent}\n\n Generated Response:{response}")
     ])
     evaluator_chain = eval_prompt | HF_LLM.fast_llm.bind(max_tokens=30, temprature=0) | StrOutputParser()
+    #
 
     return evaluator_chain
+
 
 @lru_cache(maxsize=1)
 def get_rewrite_chain():
@@ -226,18 +228,28 @@ def general_node(state: AgentState) -> AgentState:
     return state
 
 
-def is_result_weak(intent: Intent, result:Any, query:str)-> bool:
+REFLECTABLE_INTENTS = (
+    Intent.DOCUMENT_QA,
+    Intent.SEARCH_DOCUMENT,
+    Intent.AUDIO_QA,
+    Intent.IMAGE_SEARCH,
+)
+
+def is_result_weak(intent: Intent, result: Any, query: str) -> bool:
+    if intent not in REFLECTABLE_INTENTS:
+        return False
 
     if result is None:
         return True
-
     if isinstance(result, (list, tuple, str)) and len(result) == 0:
         return True
 
-    verdict = get_evaluator_chain().invoke({"query": query, "intent":intent, "response": result})
-
+    verdict = get_evaluator_chain().invoke({
+        "query": query,
+        "intent": intent.value,
+        "response": result,
+    })
     return verdict.lower().strip() == "fail"
-
 
 def reflect_node(state: AgentState) -> AgentState:
 
