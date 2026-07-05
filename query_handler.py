@@ -460,10 +460,15 @@ def handle_general(intent, request):
 
 
 def handle_uploads(request: UserRequest):
+    global AUDIO_TRANSCRIPT
     if ActiveContext.has_file:
         if ActiveContext.active_documents is not None and len(ActiveContext.active_documents) > 0:
             print("is document")
             for doc_path in request.documents:
+                doc_id = Path(doc_path).name
+                if doc_id in Data.docs:
+                    print(f"skip already-ingested doc: {doc_id}")
+                    continue
                 print("here is path")
                 print(doc_path)
                 chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)

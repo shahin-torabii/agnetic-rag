@@ -19,16 +19,18 @@ class HF_LLM:
 
     # vision_model_name = "Qwen/Qwen3-VL-8B-Instruct"
     #vision_model_name =  "meta-llama/Llama-3.2-11B-Vision-Instruct"
-    vision_model_name = "CohereLabs/aya-vision-32b"
-    fast_model_name= "Qwen/Qwen2.5-7B-Instruct"
+    #vision_model_name = "CohereLabs/aya-vision-32b"
+    # vision_model_name = "HuggingFaceM4/idefics2-8b"
+    # fast_model_name= "Qwen/Qwen2.5-7B-Instruct"
     strong_model_name = "google/gemma-4-31b-it:free"
-    base_url="https://router.huggingface.co/v1"
+    # base_url="https://router.huggingface.co/v1"
 
+    #strong_model_name = "meta-llama/llama-3.3-70b-instruct:free"
 
-    # strong_model_name = "qwen/qwen3-8b"
-    # fast_model_name = "qwen/qwen-2.5-7b-instruct"
-    # vision_model_name = "qwen/qwen3-vl-8b-instruct"
-    # base_url = "https://openrouter.ai/api/v1"
+    #strong_model_name = "liquid/lfm-2.5-1.2b-instruct:free"
+    fast_model_name = "liquid/lfm-2.5-1.2b-instruct:free"
+    vision_model_name = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+    base_url = "https://openrouter.ai/api/v1"
 
 
 def set_environ():
@@ -40,60 +42,63 @@ def load_api_key():
     load_dotenv()
     hf_api_key = os.getenv("HUGGIN_FACE_API")
     open_router_api_key = os.getenv("OPEN_ROUter_API_KEY")
-    HF_LLM.api_key = hf_api_key
+    HF_LLM.api_key = open_router_api_key
 
 
 def create_HF_client():
     set_environ()
     load_api_key()
 
-    # HF_LLM.strong_llm = ChatOpenAI(
-    #     model=HF_LLM.strong_model_name,
-    #     api_key=HF_LLM.api_key,
-    #     base_url=HF_LLM.base_url,
-    #     temperature=0,
-    # )
-    # HF_LLM.fast_llm = ChatOpenAI(
-    #     model=HF_LLM.fast_model_name,
-    #     api_key=HF_LLM.api_key,
-    #     base_url=HF_LLM.base_url,
-    #     temperature=0,
-    # )
-    # HF_LLM.vision_llm = ChatOpenAI(
-    #     model=HF_LLM.vision_model_name,
-    #     api_key=HF_LLM.api_key,
-    #     base_url=HF_LLM.base_url,
-    #     temperature=0.2,
-    # )
-
-    HF_LLM.strong_llm = ChatHuggingFace(
-        llm=HuggingFaceEndpoint(
-            repo_id=HF_LLM.strong_model_name,
-            huggingfacehub_api_token=HF_LLM.api_key,
-            temperature=0,
-        )
+    HF_LLM.strong_llm = ChatOpenAI(
+        model=HF_LLM.strong_model_name,
+        api_key=HF_LLM.api_key,
+        base_url=HF_LLM.base_url,
+        temperature=0,
+    )
+    HF_LLM.fast_llm = ChatOpenAI(
+        model=HF_LLM.fast_model_name,
+        api_key=HF_LLM.api_key,
+        base_url=HF_LLM.base_url,
+        temperature=0,
+    )
+    HF_LLM.vision_llm = ChatOpenAI(
+        model=HF_LLM.vision_model_name,
+        api_key=HF_LLM.api_key,
+        base_url=HF_LLM.base_url,
+        temperature=0.2,
     )
 
-    HF_LLM.fast_llm = ChatHuggingFace(
-        llm=HuggingFaceEndpoint(
-            repo_id=HF_LLM.fast_model_name,
-            huggingfacehub_api_token=HF_LLM.api_key,
-            temperature=0,
-        )
-    )
-
-    client = InferenceClient(api_key=HF_LLM.api_key)
-
-    def vision_invoke(messages):
-        response = client.chat.completions.create(
-            model="Qwen/Qwen2.5-VL-72B-Instruct",
-            messages=messages,
-        )
-
-        return response.choices[0].message.content
-
-    HF_LLM.vision_llm = RunnableLambda(vision_invoke)
-
+    # HF_LLM.fast_llm = ChatHuggingFace(
+    #     llm=HuggingFaceEndpoint(
+    #         repo_id=HF_LLM.fast_model_name,
+    #         huggingfacehub_api_token=HF_LLM.api_key,
+    #         temperature=0,
+    #         # Force the backend away from third-party partners like Together AI
+    #         extra_body={"provider": "hf-inference"}
+    #     )
+    # )
+    #
+    # HF_LLM.strong_llm = ChatHuggingFace(
+    #     llm=HuggingFaceEndpoint(
+    #         repo_id=HF_LLM.strong_model_name,
+    #         huggingfacehub_api_token=HF_LLM.api_key,
+    #         temperature=0,
+    #         extra_body={"provider": "hf-inference"}
+    #     )
+    # )
+    #
+    # client = InferenceClient(provider="hf-inference", api_key=HF_LLM.api_key)
+    #
+    # def vision_invoke(messages):
+    #     # 2. Swap to a vision model fully supported on HF's free serverless architecture
+    #     response = client.chat.completions.create(
+    #         model=HF_LLM.vision_model_name,
+    #         messages=messages,
+    #     )
+    #     return response.choices[0].message.content
+    #
+    # HF_LLM.vision_llm = RunnableLambda(vision_invoke)
+    #
 
 def encode_image_to_base64(image_path):
     with open(image_path, "rb") as image_file:
