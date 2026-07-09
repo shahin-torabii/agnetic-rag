@@ -362,3 +362,7 @@ def compare_documents(target_files):
 
 def document_actions():
     pass
+
+
+def rewrite_query_with_history(query, history):
+    pass
