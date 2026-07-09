@@ -1,10 +1,10 @@
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from data_gathering import UserRequest
 from LLM import HF_LLM
 from data_gathering import Data
 from index_embedd import VectorStore
-from typing import  Set, Dict
+from typing import Set, Dict
 from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -12,7 +12,6 @@ from functools import lru_cache
 
 
 class Intent(str, Enum):
-
     GENERAL_CHAT = "GENERAL_CHAT"
 
     DOCUMENT_OVERVIEW = "DOCUMENT_OVERVIEW"
@@ -42,11 +41,8 @@ class Intent(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
-
-
 @dataclass
 class QueryContext:
-
     has_document: bool = False
     has_image: bool = False
     has_audio: bool = False
@@ -60,17 +56,12 @@ class QueryContext:
     has_stored_audio: bool = False
 
 
+@dataclass
 class ActiveContext:
-
-    has_file :bool = False
-
-    active_documents: Set[str] = set()
-
-    active_images: Set[str] = set()
-
-    active_audio: Set[str] = set()
-
-    active_files_chunks :Dict[str, dict] = {"document": {}, "audio":{}}
+    has_file: bool = False
+    active_documents: Set[str] = field(default_factory=set)
+    active_images: Set[str] = field(default_factory=set)
+    active_audio: Set[str] = field(default_factory=set)
 
 
 ROUTER_SYSTEM_PROMPT = """You are an intent classifier for a multimodal RAG system.
@@ -97,8 +88,6 @@ Rules:
 - Return ONLY the class name.
 - No explanation, no markdown, no extra text.
 - Classify ONLY the user intent, not chunking/retrieval/summarization strategy."""
-
-
 
 FA_EXPLAIN = [
     "توضیح",
@@ -128,7 +117,6 @@ FA_COMPARE = [
     "تفاوت",
 ]
 
-
 FA_SECTION = [
     "بخش",
     "فصل",
@@ -151,7 +139,6 @@ FA_ACTION = [
     "تمرین",
     "quiz",
 ]
-
 
 EN_OVERVIEW = [
     "what is this about",
@@ -187,7 +174,6 @@ FA_OVERVIEW = [
     "ایده اصلی",
     "موضوع اصلی",
 ]
-
 
 EN_EXPLAIN = [
     "explain",
@@ -232,7 +218,6 @@ EN_ACTION = [
     "quiz",
     "questions",
 ]
-
 
 EN_AUDIO_TRANSCRIBE = [
     "transcribe",
@@ -281,8 +266,6 @@ def contains_any(query: str, keywords: list[str]) -> bool:
 
 
 def classify_query(query: str, ctx: QueryContext) -> Intent:
-
-
     q = query.lower().strip()
 
     has_any_documents = (
@@ -318,7 +301,7 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
             and not has_any_images
     ):
 
-        if(
+        if (
                 contains_any(q, EN_AUDIO_TRANSCRIBE)
                 or contains_any(q, FA_AUDIO_TRANSCRIBE)
         ):
@@ -344,8 +327,8 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
     ):
 
         if (
-            contains_any(q, EN_COMPARE)
-            or contains_any(q, FA_COMPARE)
+                contains_any(q, EN_COMPARE)
+                or contains_any(q, FA_COMPARE)
         ):
             return Intent.COMPARE_DOCUMENTS
 
@@ -397,7 +380,6 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
         ):
             return Intent.DOCUMENT_SUMMARIZE
 
-
         return Intent.DOCUMENT_QA
 
     return Intent.UNKNOWN
@@ -424,20 +406,19 @@ num_audio: {ctx.num_audio}"""
 
 
 def route_query(request: UserRequest):
-
     has_image = (
-        request.images is not None
-        and len(request.images) > 0
+            request.images is not None
+            and len(request.images) > 0
     )
 
     has_document = (
-        request.documents is not None
-        and len(request.documents) > 0
+            request.documents is not None
+            and len(request.documents) > 0
     )
 
     has_audio = (
-        request.audio is not None
-        and len(request.audio) > 0
+            request.audio is not None
+            and len(request.audio) > 0
     )
 
     ctx = QueryContext(
@@ -485,49 +466,24 @@ def route_query(request: UserRequest):
     return intent, ctx
 
 
+def build_active_context(request: UserRequest) -> ActiveContext:
+    has_docs = bool(request.documents)
+    has_images = bool(request.images)
+    has_audio = bool(request.audio)
 
-def manage_active_context(request:UserRequest):
-
-    ActiveContext.active_images = set()
-    ActiveContext.active_documents = set()
-    ActiveContext.active_audio = set()
-    ActiveContext.has_file = False
-
-    has_docs = (
-            request.documents is not None
-            and len(request.documents) > 0
-    )
-
-    has_images = (
-            request.images is not None
-            and len(request.images) > 0
-    )
-
-    has_audio = (
-            request.audio is not None
-            and len(request.audio) > 0
-    )
-
-    if ( has_docs or has_images or has_audio ):
-        ActiveContext.has_file = True
-
-        if has_audio:
-            audios = [Path(audio).name for audio in request.audio]
-            ActiveContext.active_audio.update(audios)
-
-        if has_images:
-            ims = [Path(image).name for image in request.images]
-            ActiveContext.active_images.update(ims)
-
-        if has_docs:
-            docs = [Path(doc).name for doc in request.documents]
-            ActiveContext.active_documents.update(docs)
-
+    ctx = ActiveContext(has_file=has_docs or has_images or has_audio)
+    if has_audio:
+        ctx.active_audio = {Path(a).name for a in request.audio}
+    if has_images:
+        ctx.active_images = {Path(i).name for i in request.images}
+    if has_docs:
+        ctx.active_documents = {Path(d).name for d in request.documents}
+    return ctx
 
 def handle_request(request: UserRequest):
     print("enter the handle request")
-    intent , ctx = route_query(request)
+    intent, ctx = route_query(request)
     print("finish routing")
-    manage_active_context(request)
+    build_active_context(request)
 
     return intent, ctx
