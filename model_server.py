@@ -49,7 +49,7 @@ async def embed_text_endpoint(req:TextEmbeddingRequest):
 
 
 @app.post("/embed/open_clip/image")
-def embed_image_endpoint(req: ImageEmbeddingRequest):
+async def embed_image_endpoint(req: ImageEmbeddingRequest):
     try:
         images = torch.stack([clip_preprocess(Image.open(p).convert("RGB")) for p in req.image_paths])
         images = images.to(device)
@@ -62,7 +62,7 @@ def embed_image_endpoint(req: ImageEmbeddingRequest):
 
 
 @app.post("/embed/open_clip/text")
-def embed_text_openclip_endpoint(req: TextEmbeddingRequestOpenclip):
+async def embed_text_openclip_endpoint(req: TextEmbeddingRequestOpenclip):
     try:
         q_token = open_clip.tokenize([req.query])
 
@@ -77,7 +77,7 @@ def embed_text_openclip_endpoint(req: TextEmbeddingRequestOpenclip):
 
 
 @app.post("/rerank")
-def rerank_endpoint(req: RerankRequest):
+async def rerank_endpoint(req: RerankRequest):
     if not req.chunks:
         return {"chunks": []}
 
