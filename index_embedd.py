@@ -197,7 +197,7 @@ def index_chunk_images(chunks: List[Chunk]):
     VectorStore.doc_image_meta = image_meta
     VectorStore.indexed_doc_images = indexed_images
 
-def index_images(image_paths: List[str]):
+def index_images(image_paths: List[str], doc_id:str):
 
     initialize()
 
@@ -211,7 +211,6 @@ def index_images(image_paths: List[str]):
         p = Path(path)
 
         image_id = get_image_id(p)
-        doc_id = "upload"
 
         key = (doc_id, image_id)
 

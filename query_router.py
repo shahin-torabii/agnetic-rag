@@ -9,7 +9,7 @@ from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from functools import lru_cache
-
+from handlers import make_doc_id
 
 class Intent(str, Enum):
     GENERAL_CHAT = "GENERAL_CHAT"
@@ -466,19 +466,20 @@ def route_query(request: UserRequest):
     return intent, ctx
 
 
-def build_active_context(request: UserRequest) -> ActiveContext:
+def build_active_context(request: UserRequest, user_id: str) -> ActiveContext:
     has_docs = bool(request.documents)
     has_images = bool(request.images)
     has_audio = bool(request.audio)
 
     ctx = ActiveContext(has_file=has_docs or has_images or has_audio)
     if has_audio:
-        ctx.active_audio = {Path(a).name for a in request.audio}
+        ctx.active_audio = {make_doc_id(user_id, a) for a in request.audio}
     if has_images:
-        ctx.active_images = {Path(i).name for i in request.images}
+        ctx.active_images = {make_doc_id(user_id, i) for i in request.images}
     if has_docs:
-        ctx.active_documents = {Path(d).name for d in request.documents}
+        ctx.active_documents = {make_doc_id(user_id, d) for d in request.documents}
     return ctx
+
 
 def handle_request(request: UserRequest):
     print("enter the handle request")

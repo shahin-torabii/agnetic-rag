@@ -12,6 +12,8 @@ import puremagic
 from handlers import *
 from resolver import resolve
 from typing import List
+from models import UserDocument
+from handlers import make_doc_id
 
 AUDIO_TRANSCRIPT = None
 
@@ -65,18 +67,19 @@ def get_doc_chunks(file_path):
     return "invalid"
 
 
-def ingest_image(image_paths: List[str]):
+def ingest_image(image_paths: List[str], user_id:str):
     not_indexed_images = []
     for im_path in image_paths:
         p = Path(im_path)
 
         image_id = get_image_id(p)
-        doc_id = "upload"
+        doc_id = f"{user_id}:upload"
         key = (doc_id, image_id)
         if not key in VectorStore.indexed_images:
             not_indexed_images.append(im_path)
 
-    index_images(not_indexed_images)
+    doc_id = f"{user_id}:upload"
+    index_images(not_indexed_images, doc_id)
 
 
 def index_to_faiss(chunks: List[Chunk]):
@@ -122,12 +125,12 @@ def build_context(chunks):
 
 def handle_image(intent, request, target_files, k = 5):
     ##TODO image path are not necesaarily from request
-    image_paths = [image for image in target_files.images] if target_files.current_images else []
+    image_paths = [image for image in target_files.images] if target_files.images else []
 
     match intent:
         case Intent.IMAGE_SEARCH:
             if len(request.images) < 4:
-                response = send_images_to_vlm(image_paths, request)
+                response = send_images_to_vlm(image_paths, request.query)
                 return response
             else:
                 result = retrieval(request.query, k=k, is_doc=False)
@@ -136,7 +139,7 @@ def handle_image(intent, request, target_files, k = 5):
                 return final_answer
 
         case Intent.IMAGE_UNDERSTANDING:
-            response = send_images_to_vlm(image_paths, request)
+            response = send_images_to_vlm(image_paths, request.query)
             return response
 
         case _:
@@ -459,47 +462,65 @@ def handle_general(intent, request):
     return response.choices[0].message.content
 
 
-def handle_uploads(request: UserRequest):
+def _record_user_document(db_session, user_id, doc_id, filename, kind, meta=None):
+    pass
+
+
+def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_session=None):
     global AUDIO_TRANSCRIPT
-    if ActiveContext.has_file:
-        if ActiveContext.active_documents is not None and len(ActiveContext.active_documents) > 0:
-            print("is document")
-            for doc_path in request.documents:
-                doc_id = Path(doc_path).name
-                if doc_id in Data.docs:
-                    print(f"skip already-ingested doc: {doc_id}")
-                    continue
-                print("here is path")
-                print(doc_path)
-                chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
-                print("doc process done")
-                ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
-                print("ingest done")
-                index_to_faiss(chunks)
-                print("faiss index done")
 
-        if ActiveContext.active_audio is not None and len(ActiveContext.active_audio) > 0:
+    if not active_ctx.has_file:
+        return
 
-            transcripts = []
-            for audio_path in ActiveContext.active_audio:
-                chunks, transcript, meta = process_audio(audio_path)
+    if request.documents:
+        for doc_path in request.documents:
+            doc_id = make_doc_id(user_id, doc_path)
 
-                ingest(
-                    chunks=chunks,
-                    doc_meta=meta,
-                    img_to_ch=None,
-                    tbl_to_ch=None
-                )
+            if doc_id in Data.docs:
+                print(f"skip already-ingested doc: {doc_id}")
+                continue
 
-                transcripts.append(transcript)
+            chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
+            meta.doc_id = doc_id
+            for c in chunks:
+                c.doc_id = doc_id
 
-                index_to_faiss(chunks)
+            ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
+            index_to_faiss(chunks)
 
+            if db_session is not None:
+                _record_user_document(db_session, user_id, doc_id, Path(doc_path).name, "document", meta)
+
+    if request.audio:
+        transcripts = []
+        for audio_path in request.audio:
+            doc_id = make_doc_id(user_id, audio_path)
+
+            if doc_id in Data.docs:
+                print(f"skip already-ingested audio: {doc_id}")
+                continue
+
+            chunks, transcript, meta = process_audio(audio_path)
+            meta.doc_id = doc_id
+            for c in chunks:
+                c.doc_id = doc_id
+
+            ingest(chunks=chunks, doc_meta=meta, img_to_ch=None, tbl_to_ch=None)
+            transcripts.append(transcript)
+            index_to_faiss(chunks)
+
+            if db_session is not None:
+                _record_user_document(db_session, user_id, doc_id, Path(audio_path).name, "audio", meta)
+
+        if transcripts:
             AUDIO_TRANSCRIPT = transcripts
 
-    if ActiveContext.active_images is not None and len(ActiveContext.active_images) > 0:
-        image_paths = [image_path for image_path in ActiveContext.active_images]
-        ingest_image(image_paths)
+    if request.images:
+        ingest_image(list(request.images), user_id=user_id)
+        if db_session is not None:
+            for img_path in request.images:
+                doc_id = make_doc_id(user_id, img_path)
+                _record_user_document(db_session, user_id, doc_id, Path(img_path).name, "image")
 
 
 def handle_query(request: UserRequest):

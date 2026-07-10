@@ -366,3 +366,7 @@ def document_actions():
 
 def rewrite_query_with_history(query, history):
     pass
+
+
+def make_doc_id(user_id: str, filename_or_path: str) -> str:
+    return f"{user_id}:{Path(filename_or_path).name}"
