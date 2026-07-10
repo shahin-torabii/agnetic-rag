@@ -82,7 +82,7 @@ def get_improve_query_chain():
     return improve_query_chain
 
 
-def search_text(query: str, k: int = 5, oversample_factor: int = 4) -> List[dict]:
+def search_text(query: str, k: int = 5, oversample_factor: int = 4, allowed_doc_ids: list = None) -> List[dict]:
     text_index = VectorStore.text_index
     text_meta = VectorStore.text_meta
     if text_index is None or text_index.ntotal == 0:
@@ -101,7 +101,8 @@ def search_text(query: str, k: int = 5, oversample_factor: int = 4) -> List[dict
         if fid == -1:
             continue
         chunk = text_meta[fid]
-
+        if allowed_doc_ids is not None and chunk.doc_id not in allowed_doc_ids:
+            continue
 
         if chunk.text in seen_texts:
             continue
@@ -122,7 +123,7 @@ def search_text(query: str, k: int = 5, oversample_factor: int = 4) -> List[dict
     return results
 
 
-def search_chunk_image(query: str, k: int = 5) -> List[dict]:
+def search_chunk_image(query: str, k: int = 5, allowed_doc_ids: list = None) -> List[dict]:
     image_index = VectorStore.doc_image_index
     image_meta = VectorStore.doc_image_meta
     if image_index is None or image_index.ntotal == 0:
@@ -142,6 +143,8 @@ def search_chunk_image(query: str, k: int = 5) -> List[dict]:
         if fid == -1:
             continue
         meta = image_meta[fid]
+        if allowed_doc_ids is not None and meta.doc_id not in allowed_doc_ids:
+            continue
         results.append({
             "score":        round(float(score), 4),
             "image_id":     meta["image_id"],
@@ -154,7 +157,7 @@ def search_chunk_image(query: str, k: int = 5) -> List[dict]:
 
 
 
-def search_image(query: str, k: int = 5) -> List[dict]:
+def search_image(query: str, k: int = 5, allowed_doc_ids: list = None) -> List[dict]:
     image_index = VectorStore.image_index
     image_meta = VectorStore.image_meta
     if image_index is None or image_index.ntotal == 0:
@@ -181,6 +184,8 @@ def search_image(query: str, k: int = 5) -> List[dict]:
         if fid == -1:
             continue
         meta = image_meta[fid]
+        if allowed_doc_ids is not None and meta["doc_id"] not in allowed_doc_ids:
+            continue
         results.append({
             "score":        round(float(score), 4),
             "image_id":     meta["image_id"],
@@ -262,9 +267,9 @@ def _chunk_to_dict(chunk) -> dict:
 
 
 def retrieval_text(query: str, k: int = 3,
-                   min_threshold: float = 0.08) -> List[dict]:
+                   min_threshold: float = 0.08, allowed_doc_ids: list = None) -> List[dict]:
 
-    primary_results  = search_text(query, k=2, oversample_factor=4)
+    primary_results  = search_text(query, k=2, oversample_factor=4, allowed_doc_ids=allowed_doc_ids)
     reranked_results = rerank(query=query, chunks=primary_results, threshold=-50)
 
     if reranked_results and reranked_results[0]["score"] >= min_threshold:
@@ -275,16 +280,16 @@ def retrieval_text(query: str, k: int = 3,
     new_query = improve_query(query)
     print(f"   Expanded query: '{new_query}'")
 
-    fallback_candidates = search_text(new_query, k=k, oversample_factor=4)
+    fallback_candidates = search_text(new_query, k=k, oversample_factor=4, allowed_doc_ids=allowed_doc_ids)
     final_res = rerank(query=new_query, chunks=fallback_candidates,
                   top_k=k, threshold=0.0)
 
     return final_res
 
 
-def search_and_rerank_chunk_images( query: str,rerank_query: str) -> tuple[list[dict], dict]:
+def search_and_rerank_chunk_images( query: str,rerank_query: str, allowed_doc_ids: list = None) -> tuple[list[dict], dict]:
 
-    image_results = search_chunk_image(query, k=10)
+    image_results = search_chunk_image(query, k=10, allowed_doc_ids=allowed_doc_ids)
 
     image_scores = {}
 
@@ -311,15 +316,15 @@ def search_and_rerank_chunk_images( query: str,rerank_query: str) -> tuple[list[
 
 
 def retrieval_chunk_image(query: str, k: int = 3,
-                    min_threshold: float = 0.08) -> List[dict]:
+                    min_threshold: float = 0.08, allowed_doc_ids: list = None) -> List[dict]:
 
-    reranked, image_scores = search_and_rerank_chunk_images(query, rerank_query=query)
+    reranked, image_scores = search_and_rerank_chunk_images(query, rerank_query=query, allowed_doc_ids = allowed_doc_ids)
 
     if not reranked or reranked[0]["score"] < min_threshold:
         print("⚠️  Low image confidence — activating query expansion fallback...")
         expanded_query          = improve_query(query)
         reranked, image_scores  = search_and_rerank_chunk_images(
-            expanded_query, rerank_query=expanded_query
+            expanded_query, rerank_query=expanded_query, allowed_doc_ids = allowed_doc_ids
         )
 
     structural = is_structural_query(query)
@@ -348,9 +353,9 @@ def retrieval_chunk_image(query: str, k: int = 3,
 
 
 ##TODO for future and advanced versions: generate caption for images and use that as a reranker or use a multimodal reranker
-def retrieval_image( query: str,k: int = 3,min_threshold: float = 0.08) -> list[dict]:
+def retrieval_image( query: str,k: int = 3,min_threshold: float = 0.08, allowed_doc_ids:list = None) -> list[dict]:
 
-    original_results = search_image(query, k)
+    original_results = search_image(query, k, allowed_doc_ids)
 
     if (
         not original_results
@@ -377,15 +382,11 @@ def retrieval_image( query: str,k: int = 3,min_threshold: float = 0.08) -> list[
     return original_results
 
 
-
-def retrieval( query: str,k: int = 3,min_threshold: float = 0.08,is_doc: bool = True):
-
+def retrieval(query:str, k :int = 3, min_threshold: float = 0.08, is_doc:bool = True, allowed_doc_ids: list = None):
     if not is_doc:
-        return retrieval_image(query=query,k=k,min_threshold=min_threshold)
-
-    text_results = retrieval_text(query,k,min_threshold)
-
-    image_results = retrieval_chunk_image(query,k,min_threshold)
+        return retrieval_image(query, k, min_threshold, allowed_doc_ids)
+    text_results = retrieval_text(query, k, min_threshold, allowed_doc_ids)
+    image_results = retrieval_chunk_image(query, k, min_threshold, allowed_doc_ids)
     seen = set()
     combined = []
     for r in text_results + image_results:

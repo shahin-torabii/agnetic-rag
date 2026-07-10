@@ -133,7 +133,7 @@ def handle_image(intent, request, target_files, k = 5):
                 response = send_images_to_vlm(image_paths, request.query)
                 return response
             else:
-                result = retrieval(request.query, k=k, is_doc=False)
+                result = retrieval(request.query, k=k, is_doc=False,  allowed_doc_ids=set(target_files.images))
                 context = build_context(result)
                 final_answer = final_rag_llm(request.query, context)
                 return final_answer
@@ -171,7 +171,7 @@ def handle_audio(intent, request, target_files, k = 10):
             return audio_transcript
 
         case Intent.AUDIO_QA:
-            result = retrieval(query=request.query, k=k, is_doc=True)
+            result = retrieval(query=request.query, k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
             context = build_context(result)
             final_answer = final_rag_llm(request.query, context)
             return final_answer
@@ -220,7 +220,7 @@ def handle_document(intent, request, target_files, k = 10):
             return "\n\n".join(summaries)
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
-            result = retrieval(query=request.query, k=k, is_doc=True)
+            result = retrieval(query=request.query, k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
             print("\n\n")
             print(result)
             context = build_context(result)
@@ -344,7 +344,7 @@ def handle_multimodal(intent, request, target_files, k = 10):
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
 
-            doc_res = retrieval(query=request.query,k=k, is_doc=True)
+            doc_res = retrieval(query=request.query,k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
             doc_context = build_context(doc_res)
             final_doc_answer = final_rag_llm(request.query, doc_context)
 
@@ -462,8 +462,17 @@ def handle_general(intent, request):
     return response.choices[0].message.content
 
 
-def _record_user_document(db_session, user_id, doc_id, filename, kind, meta=None):
-    pass
+def _record_user_document(db, user_id, doc_id, filename, kind, meta=None):
+    existing = db.query(UserDocument).filter(UserDocument.doc_id == doc_id).first()
+    if existing:
+        return
+    db.add(UserDocument(
+        user_id=user_id, doc_id=doc_id, filename=filename, kind=kind,
+        title=getattr(meta , "title", " ") if meta else " ",
+        doc_type=getattr(meta, "doc_type", "GENERAL") if meta else "GENERAL",
+    ))
+    db.commit()
+    db.refresh(UserDocument)
 
 
 def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_session=None):
