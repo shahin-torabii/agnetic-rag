@@ -50,7 +50,7 @@ def chat(db: Session, user_id: str, session_id: str, query: str, documents=None,
         audio = audio or []
     )
 
-    result = run_agent(request)
+    result = run_agent(request, user_id= user_id, session_id=session_id, db=db)
 
     answer = result if isinstance(result, str) else str(result)
     save_message(db, session_id, role="Assistant", content=answer)

@@ -6,31 +6,37 @@ from langgraph.graph import StateGraph, END
 from index_embedd import VectorStore
 from query_router import (
     Intent, QueryContext, classify_query, llm_router,
-    ActiveContext, manage_active_context
+    ActiveContext, build_active_context
 )
 from resolver import resolve
 from data_gathering import Data, UserRequest
 from query_handler import (
     handle_uploads, handle_audio, handle_image, handle_document,
-    handle_multimodal, handle_general
-)
+    handle_multimodal, handle_general)
 
 from LLM import HF_LLM
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from models import UserDocument
+
 
 
 @dataclass
 class AgentState:
     request: UserRequest
+    user_id: str
+    session_id: str
+    db: Any = None
     ctx: Optional[QueryContext] = None
     intent: Optional[Intent] = None
-    target_files : Any = None
-    k:int = 10
+    active_ctx: Any = None
+    target_files: Any = None
+    k: int = 10
     result: Any = None
-    error: Optional[str] =None
+    error: Optional[str] = None
     retry_count: int = 0
     rewritten_query: Optional[str] = None
+
 
 MAX_RETRIES = 3
 
@@ -42,7 +48,6 @@ Route = Literal[
     "multimodal",
     "general",
 ]
-
 
 
 EVALUATION_PROMPT = """
@@ -90,9 +95,16 @@ def pick_k(intent: Intent) -> int:
     return 10
 
 
+def get_user_doc_kinds(user_id: str, db) -> set[str]:
+    rows = db.query(UserDocument.kind).filter(UserDocument.user_id == user_id).distinct().all()
+    return {r[0] for r in rows}
+
+
 def router_node(state:AgentState) -> AgentState:
 
     request = state.request
+    kinds = get_user_doc_kinds(state.user_id, state.db_session)
+
     has_image = (
         request.images is not None
         and len(request.images) > 0)
@@ -115,14 +127,10 @@ def router_node(state:AgentState) -> AgentState:
         num_documents=len(request.documents) if request.documents else 0,
         num_audio=len(request.audio) if request.audio else 0,
 
-        has_stored_documents=(len(Data.docs) > 0),
-        has_stored_images=( VectorStore.image_index is not None
-            and VectorStore.image_index.ntotal > 0),
-        has_stored_audio=(
-            any(
-                getattr(doc, "doc_type", None) == "audio"
-                for doc in Data.docs.values())
-        )
+        has_stored_documents="document" in kinds,
+        has_stored_images="image" in kinds,
+        has_stored_audio="audio" in kinds,
+
     )
 
     intent = classify_query(request.query, ctx)
@@ -133,19 +141,18 @@ def router_node(state:AgentState) -> AgentState:
     state.intent = intent
     state.ctx = ctx
     state.k = pick_k(intent)
-    
+
     return state
 
 
-def context_node(state:AgentState) -> AgentState:
-
-    manage_active_context(state.request)
-    handle_uploads(state.request)
+def context_node(state: AgentState) -> AgentState:
+    state.active_ctx = build_active_context(state.request, state.user_id)
+    handle_uploads(state.request, state.active_ctx, state.user_id, state.db)
     return state
 
 
 def resolver_node(state: AgentState) -> AgentState:
-    state.target_files = resolve(state.request)
+    state.target_files = resolve(state.request, state.active_ctx, state.user_id, state.db)
     return state
 
 
@@ -312,8 +319,8 @@ def build_graph():
     return graph.compile()
 
 
-def run_agent(request: UserRequest):
+def run_agent(request: UserRequest, user_id: str, session_id: str, db=None):
     app = build_graph()
-    final_state = app.invoke(AgentState(request=request))
-    result = final_state["result"] if isinstance(final_state, dict) else final_state.result
-    return result
+    initial_state = AgentState(request=request, user_id=user_id, session_id=session_id, db = db)
+    final_state = app.invoke(initial_state)
+    return final_state["result"] if isinstance(final_state, dict) else final_state.result
