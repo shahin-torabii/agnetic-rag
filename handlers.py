@@ -1,5 +1,7 @@
 import time
 import json
+from functools import lru_cache
+
 from retreival import retrieval
 from data_gathering import Chunk, BaseMeta, Data
 from LLM import encode_image_to_base64, HF_LLM
@@ -7,6 +9,7 @@ from LLM import encode_image_to_base64, HF_LLM
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from pathlib import Path
 
 MAX_RETRIES = 3
 RETRY_WAIT_SECONDS = 5
@@ -364,8 +367,28 @@ def document_actions():
     pass
 
 
+CONTEXTUALIZE_SYSTEM_PROMPT = """You rewrite a user's follow-up question into a
+fully self-contained question, using the conversation history to resolve
+pronouns and references (it, that, the second one, etc).
+
+Rules:
+- Preserve the original language.
+- Return ONLY the rewritten question, nothing else.
+- If the question is already self-contained, return it unchanged."""
+
+
+@lru_cache
+def _get_rewrite_with_history_chain():
+    rewrite_with_history_prompt = ChatPromptTemplate.from_messages([
+        ("system", CONTEXTUALIZE_SYSTEM_PROMPT),
+        ("human", "Conversation history:\n{history}\n\nFollow-up question: {query}")
+    ])
+    evaluator_chain = rewrite_with_history_prompt | HF_LLM.fast_llm.bind(max_tokens=85) | StrOutputParser()
+    return evaluator_chain
+
+
 def rewrite_query_with_history(query, history):
-    pass
+    return _get_rewrite_with_history_chain().invoke({"query": query, "history": history}).strip
 
 
 def make_doc_id(user_id: str, filename_or_path: str) -> str:
