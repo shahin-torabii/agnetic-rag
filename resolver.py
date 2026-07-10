@@ -1,7 +1,6 @@
 from functools import lru_cache
 
 from LLM import HF_LLM
-from query_router import ActiveContext
 from dataclasses import dataclass, field
 from typing import List
 from data_gathering import Data, UserRequest
@@ -10,7 +9,9 @@ from rapidfuzz import fuzz
 from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-
+from models import UserDocument
+from query_router import ActiveContext
+from sqlalchemy.orm import Session
 
 REFERENCE_RESOLVER_SYSTEM_PROMPT = """You are a file reference resolver.
 
@@ -32,9 +33,6 @@ Schema:
   "images": [],
   "confidence": 0.0
 }}"""
-
-
-
 
 CURRENT_FILE_SIGNALS = {
 
@@ -62,7 +60,6 @@ CURRENT_FILE_SIGNALS = {
     "فایلی که فرستادم"
 }
 
-
 ALL_FILES_SIGNALS = {
 
     # English
@@ -84,7 +81,6 @@ ALL_FILES_SIGNALS = {
     "تمام اسناد"
 }
 
-
 ORDINAL_SIGNALS = {
     "first": 0,
     "second": 1,
@@ -99,7 +95,6 @@ ORDINAL_SIGNALS = {
     "پنجم": 4
 }
 
-
 LAST_SIGNALS = {
     "last",
     "latest",
@@ -112,7 +107,6 @@ LAST_SIGNALS = {
 
 @dataclass
 class ResolvedTargets:
-
     documents: List[str] = field(default_factory=list)
 
     images: List[str] = field(default_factory=list)
@@ -131,9 +125,12 @@ def get_resolver_chain():
     return resolver_chain
 
 
+def user_doc_ids(user_id: str, db_session) -> list[str]:
+    rows = db_session.query(UserDocument.doc_id).filter(UserDocument.user_id == user_id).all()
+    return [r[0] for r in rows]
+
 
 def normalize_name(name: str) -> str:
-
     name = Path(name).name.lower()
 
     if "." in name:
@@ -142,176 +139,78 @@ def normalize_name(name: str) -> str:
     return name.strip()
 
 
-def resolve_ordinals(query: str) -> list[str]:
-
+def resolve_ordinals(query: str, active_ctx: ActiveContext) -> list[str]:
     q = query.lower()
-
-    active_docs = list(
-        ActiveContext.active_documents.union(ActiveContext.active_audio)
-    )
-
+    active_docs = list(active_ctx.active_documents.union(active_ctx.active_audio))
     matched = []
-
     for signal, idx in ORDINAL_SIGNALS.items():
-
-        if signal in q:
-
-            if idx < len(active_docs):
-
-                matched.append(
-                    active_docs[idx]
-                )
-
-    if any(
-        signal in q
-        for signal in LAST_SIGNALS
-    ):
-
-        if active_docs:
-
-            matched.append(
-                active_docs[-1]
-            )
-
+        if signal in q and idx < len(active_docs):
+            matched.append(active_docs[idx])
+    if any(signal in q for signal in LAST_SIGNALS) and active_docs:
+        matched.append(active_docs[-1])
     return list(set(matched))
 
 
-def extract_document_mentions(
-    query: str,
-    threshold: int = 85
-) -> list[str]:
-
+def extract_document_mentions(query: str, user_id : str, db: Session ,threshold: int = 85) -> list[str]:
     q = query.lower()
-
     matches = []
 
-    for doc_id, meta in Data.docs.items():
+    for doc_id in user_doc_ids(user_id, db):
+        meta = Data.docs.get(doc_id)
 
-        title = normalize_name(
-            meta.title
-        )
-
+        if meta is None:
+            continue
+        title = normalize_name(meta.title)
         if title in q:
-
             matches.append(doc_id)
             continue
-
-        score = fuzz.partial_ratio(
-            title,
-            q
-        )
-        if score >= threshold:
+        if fuzz.partial_ratio(title, q) >= threshold:
             matches.append(doc_id)
-
     return list(set(matches))
 
 
 def contains_signal(query: str, signals: set[str]) -> bool:
-
     q = query.lower()
 
-    return any(signal.lower() in q
-        for signal in signals
-    )
+    return any(signal.lower() in q for signal in signals)
 
 
-def resolve_targets(
-    query: str
-) -> ResolvedTargets:
-
+def resolve_targets(query: str, active_ctx, user_id: str, db_session) -> ResolvedTargets:
     result = ResolvedTargets()
-
     q = query.lower()
 
-
-    explicit_docs = extract_document_mentions(
-        query
-    )
-
+    explicit_docs = extract_document_mentions(query, user_id, db_session)
     if explicit_docs:
+        result.documents.extend(explicit_docs)
 
-        result.documents.extend(
-            explicit_docs
-        )
+    if contains_signal(q, CURRENT_FILE_SIGNALS):
+        result.documents.extend(active_ctx.active_documents)
+        result.documents.extend(active_ctx.active_audio)
+        result.images.extend(active_ctx.active_images)
 
+    if contains_signal(q, ALL_FILES_SIGNALS):
+        result.documents.extend(user_doc_ids(user_id, db_session))
 
-    if contains_signal(
-        q,
-        CURRENT_FILE_SIGNALS
-    ):
-
-        result.documents.extend(
-            ActiveContext.active_documents
-        )
-        result.documents.extend(ActiveContext.active_audio)
-
-        result.images.extend(
-            ActiveContext.active_images
-        )
-
-
-    if contains_signal(
-        q,
-        ALL_FILES_SIGNALS
-    ):
-
-        result.documents.extend(
-            Data.docs.keys()
-        )
-
-
-    result.documents = list(
-        set(result.documents)
-    )
-
-    result.images = list(
-        set(result.images)
-    )
-
-
-    if (
-        not result.documents
-        and not result.images
-    ):
-
-        result.confidence = 0.3
-
-    else:
-
-        result.confidence = 0.9
+    result.documents = list(set(result.documents))
+    result.images = list(set(result.images))
+    result.confidence = 0.9 if (result.documents or result.images) else 0.3
 
     return result
 
 
-def build_candidate_context():
+def build_candidate_context(user_id: str, db: Session):
 
-    docs = []
-
-    for doc_id, meta in Data.docs.items():
-
-        docs.append(
-            {
-                "doc_id": doc_id,
-                "title": meta.title,
-                "doc_type": getattr(
-                    meta,
-                    "doc_type",
-                    "document"
-                )
-            }
-        )
-
+    rows = db.query(UserDocument).filter(UserDocument.user_id == user_id).all()
+    docs = [{"doc_id": r.doc_id, "title": r.title, "doc_type": r.doc_type} for r in rows]
     return docs
 
 
-def llm_reference_resolver(query: str) -> ResolvedTargets:
-    candidates = build_candidate_context()
+def llm_reference_resolver(query: str, active_ctx: ActiveContext, user_id: str, db: Session) -> ResolvedTargets:
+    candidates = build_candidate_context(user_id, db)
 
     current_uploads = {
-        "documents": list(
-            ActiveContext.active_documents | ActiveContext.active_audio
-        ),
-        "images": list(ActiveContext.active_images),
+        "documents": list(active_ctx.active_documents | active_ctx.active_audio),
+        "images": list(active_ctx.active_images),
     }
 
     user_prompt = f"""User Query:
@@ -363,36 +262,20 @@ Return JSON only."""
             confidence=0.0
         )
 
-def resolve(request:UserRequest):
 
+
+def resolve(request: UserRequest, active_ctx, user_id: str, db: Session) -> ResolvedTargets:
     query = request.query
-    resolved = resolve_targets(query)
+    resolved = resolve_targets(query, active_ctx, user_id, db)
 
-
-    if (
-            resolved.confidence < 0.6
-            and ActiveContext.active_documents
-    ):
-
-        ordinal_docs = resolve_ordinals(
-            query
-        )
-
+    if resolved.confidence < 0.6 and active_ctx.active_documents:
+        ordinal_docs = resolve_ordinals(query, active_ctx)
         if ordinal_docs:
-            resolved.documents.extend(
-                ordinal_docs
-            )
-
-            resolved.documents = list(
-                set(resolved.documents)
-            )
-
+            resolved.documents.extend(ordinal_docs)
+            resolved.documents = list(set(resolved.documents))
             resolved.confidence = 0.95
 
     if resolved.confidence < 0.6:
-        resolved = llm_reference_resolver(
-            query
-        )
+        resolved = llm_reference_resolver(query, active_ctx, user_id, db)
 
     return resolved
-
