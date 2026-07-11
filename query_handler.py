@@ -1,6 +1,6 @@
 from query_router import Intent, handle_request, ActiveContext
 from data_gathering import UserRequest, ingest
-from index_embedd import index_images, VectorStore, get_image_id, index_chunks, index_chunk_images
+from index_embedd import index_images, VectorStore, get_image_id, index_chunks, index_chunk_images, save
 from pathlib import Path
 from chunking_handlers.audio_hanlder import process_audio
 from chunking_handlers.non_digital_pdf_handler import process_scanned_pdf
@@ -16,7 +16,7 @@ from models import UserDocument
 from handlers import make_doc_id
 
 AUDIO_TRANSCRIPT = None
-
+PERSIST_DIR = "storage"
 
 def detect_file_type(file_path):
     path = Path(file_path)
@@ -466,13 +466,14 @@ def _record_user_document(db, user_id, doc_id, filename, kind, meta=None):
     existing = db.query(UserDocument).filter(UserDocument.doc_id == doc_id).first()
     if existing:
         return
-    db.add(UserDocument(
+    user_doc = UserDocument(
         user_id=user_id, doc_id=doc_id, filename=filename, kind=kind,
         title=getattr(meta , "title", " ") if meta else " ",
         doc_type=getattr(meta, "doc_type", "GENERAL") if meta else "GENERAL",
-    ))
+    )
+    db.add(user_doc)
     db.commit()
-    db.refresh(UserDocument)
+    db.refresh(user_doc)
 
 
 def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_session=None):
@@ -531,6 +532,8 @@ def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_sess
                 doc_id = make_doc_id(user_id, img_path)
                 _record_user_document(db_session, user_id, doc_id, Path(img_path).name, "image")
 
+    save(PERSIST_DIR)
+
 
 def handle_query(request: UserRequest):
     print("enter the handler")
@@ -555,7 +558,7 @@ def handle_query(request: UserRequest):
             return handle_audio(intent, request, target_files)
 
         case (Intent.GENERAL_CHAT | Intent.UNKNOWN ):
-            return handle_general(intent, request, target_files)
+            return handle_general(intent, request)
 
         case _:
             if request.audio or request.images:

@@ -10,23 +10,25 @@ from database import get_db, engine, Base
 from chat_service import chat
 from auth import *
 from LLM import initialize_hf_llm, HF_LLM
-from index_embedd import initialize
+from index_embedd import initialize, save, load
 import uvicorn
 
 Base.metadata.create_all(bind=engine)
 
+
+PERSIST_DIR = "storage"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
     initialize()
     initialize_hf_llm()
-
+    load(PERSIST_DIR)
     print("llm initialized")
     print(HF_LLM.fast_llm)
 
     yield  # Application runs here
-
+    save(PERSIST_DIR)
     print("shutting down")
 app = FastAPI(title="agentic-rag chatbot",lifespan=lifespan)
 
@@ -69,10 +71,9 @@ def upload_file(file: UploadFile = File(...), current_user = Depends(get_current
     user_upload_dir = os.path.join(UPLOAD_DIR, current_user.id)
     os.makedirs(user_upload_dir, exist_ok=True)
     dest = os.path.join(user_upload_dir, file.filename)
-
+    print(dest)
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
-
     return {"path": dest}
 
 
