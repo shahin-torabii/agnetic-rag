@@ -1,4 +1,6 @@
 import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
 from models import Message, User, ChatSession
@@ -7,11 +9,37 @@ import shutil
 from database import get_db, engine, Base
 from chat_service import chat
 from auth import *
+from LLM import initialize_hf_llm, HF_LLM
+from index_embedd import initialize
+import uvicorn
 
 Base.metadata.create_all(bind=engine)
-app = FastAPI(title="agentic-rag chatbot")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    initialize()
+    initialize_hf_llm()
+
+    print("llm initialized")
+    print(HF_LLM.fast_llm)
+
+    yield  # Application runs here
+
+    print("shutting down")
+app = FastAPI(title="agentic-rag chatbot",lifespan=lifespan)
 
 UPLOAD_DIR = "uploads"
+
+
+
+# @app.on_event("startup")
+# def startup_event():
+#     initialize()
+#     initialize_hf_llm()
+#     print("llm initialized")
+#     print(HF_LLM.fast_llm)
 
 
 @app.post("/auth/register", response_model=TokenResponse)
@@ -80,6 +108,25 @@ def get_messages(session_id: str, current_user: User = Depends(get_current_user)
     if session is None:
         raise HTTPException(404, "Session not found")
     return db.query(Message).filter(Message.session_id == session_id).order_by(Message.created_at).all()
+
+@app.get("/chats")
+def list_chats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sessions = (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == current_user.id)
+        .order_by(ChatSession.created_at.desc())
+        .all()
+    )
+    return [{"session_id": s.id, "title": s.title, "created_at": s.created_at.isoformat()} for s in sessions]
+
+
+if __name__ == "__main__":
+
+    initialize()
+    initialize_hf_llm()
+    print("llm initialized")
+    print(HF_LLM.fast_llm)
+    uvicorn.run("chatbot:app", host="127.0.0.1", port=8000, reload=True)
 
 
 
