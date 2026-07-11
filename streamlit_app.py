@@ -1,7 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import requests
-from matplotlib.patheffects import withStroke
+
 
 API_URL = "http://127.0.0.1:8000"
 
@@ -43,6 +43,18 @@ def api_post(path, json = None, headers = None, files = None):
 def api_get(path, headers=None):
     try:
         r = requests.get(f"{API_URL}{path}", headers=headers, timeout=50)
+        if r.status_code >= 400:
+            st.error(r.json().get("detail", r.text))
+            return None
+        return r.json()
+    except requests.exceptions.ConnectionError:
+        st.error("Can't reach the backend. Is it running on http://127.0.0.1:8000 ?")
+        return None
+
+
+def api_delete(path, headers=None):
+    try:
+        r = requests.delete(f"{API_URL}{path}", headers=headers, timeout=30)
         if r.status_code >= 400:
             st.error(r.json().get("detail", r.text))
             return None
@@ -101,15 +113,24 @@ def sidebar():
         st.caption("Your Chats")
         chats = api_get("/chats", headers=auth_headers()) or []
         for chat in chats:
-            label = chat["title"] or "Untitled"
-            if st.button(label=label, key=chat["session_id"], use_container_width=True):
-                st.session_state.current_session_id = chat["session_id"]
-                history = api_get(
-                    f"/chats/{chat['session_id']}/messages", headers=auth_headers()
-                ) or []
-                st.session_state.messages = [
-                    {"role": m["role"], "content": m["content"]} for m in history]
-                st.rerun()
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                label = chat["title"] or "(untitled)"
+                if st.button(label, key=chat["session_id"], use_container_width=True):
+                    st.session_state.current_session_id = chat["session_id"]
+                    st.query_params["session_id"] = chat["session_id"]
+                    history = api_get(f"/chats/{chat['session_id']}/messages", headers=auth_headers()) or []
+                    st.session_state.messages = [{"role": m["role"], "content": m["content"]} for m in history]
+                    st.rerun()
+
+            with col2:
+                if st.button("Delete", key=f"del_{chat['session_id']}"):
+                    api_delete(f"/chats/{chat["session_id"]}", headers=auth_headers())
+                    if st.session_state.current_session_id ==chat["session_id"]:
+                        st.session_state.current_session_id = None
+                        st.session_state.messages = []
+                        st.query_params.clear()
+                    st.rerun()
 
         st.divider()
 
