@@ -323,7 +323,6 @@ def classify_query(query: str, ctx: QueryContext) -> Intent:
 
     if (
             ctx.num_documents >= 2
-            or len(Data.docs) >= 2
     ):
 
         if (

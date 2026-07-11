@@ -100,37 +100,51 @@ def get_user_doc_kinds(user_id: str, db) -> set[str]:
     return {r[0] for r in rows}
 
 
+def split_resolved_kinds(target_files):
+    docs, audio = [], []
+    for doc_id in target_files.documents:
+        meta = Data.docs.get(doc_id)
+        if meta is not None and getattr(meta, "doc_type", None) == "audio":
+            audio.append(doc_id)
+        else:
+            docs.append(doc_id)
+    return docs, audio
+
+
+def context_node(state: AgentState) -> AgentState:
+    state.active_ctx = build_active_context(state.request, state.user_id)
+    handle_uploads(state.request, state.active_ctx, state.user_id, state.db)
+    return state
+
+
+def resolver_node(state: AgentState) -> AgentState:
+    state.target_files = resolve(state.request, state.active_ctx, state.user_id, state.db)
+    return state
+
+
 def router_node(state:AgentState) -> AgentState:
 
     request = state.request
-    kinds = get_user_doc_kinds(state.user_id, state.db_session)
+    target_files = state.target_files
+    resolved_images = target_files.images
+    resolved_docs, resolved_audio = split_resolved_kinds(target_files)
 
-    has_image = (
-        request.images is not None
-        and len(request.images) > 0)
-
-    has_document = (
-        request.documents is not None
-        and len(request.documents) > 0)
-    ####equivalent:
-    ## has_document = bool(request.document)
-    has_audio = (
-        request.audio is not None
-        and len(request.audio) > 0)
+    if not(resolved_images or target_files.documents) and not state.active_ctx.has_file:
+        state.intent = Intent.GENERAL_CHAT
+        state.ctx = QueryContext()
+        state.k = pick_k(state.intent)
+        return state
 
     ctx = QueryContext(
-        has_image=has_image,
-        has_document=has_document,
-        has_audio=has_audio,
-
-        num_images=len(request.images) if request.images else 0,
-        num_documents=len(request.documents) if request.documents else 0,
-        num_audio=len(request.audio) if request.audio else 0,
-
-        has_stored_documents="document" in kinds,
-        has_stored_images="image" in kinds,
-        has_stored_audio="audio" in kinds,
-
+        has_image=bool(resolved_images),
+        has_document=bool(resolved_docs),
+        has_audio=bool(resolved_audio),
+        num_images=len(resolved_images),
+        num_documents=len(resolved_docs),
+        num_audio=len(resolved_audio),
+        has_stored_documents=bool(resolved_docs),
+        has_stored_images=bool(resolved_images),
+        has_stored_audio=bool(resolved_audio),
     )
 
     intent = classify_query(request.query, ctx)
@@ -142,17 +156,6 @@ def router_node(state:AgentState) -> AgentState:
     state.ctx = ctx
     state.k = pick_k(intent)
 
-    return state
-
-
-def context_node(state: AgentState) -> AgentState:
-    state.active_ctx = build_active_context(state.request, state.user_id)
-    handle_uploads(state.request, state.active_ctx, state.user_id, state.db)
-    return state
-
-
-def resolver_node(state: AgentState) -> AgentState:
-    state.target_files = resolve(state.request, state.active_ctx, state.user_id, state.db)
     return state
 
 
@@ -184,7 +187,7 @@ def dispatch_branch(state: AgentState) -> Route:
     if route:
         return route
 
-    if request.audio or request.images:
+    if request.audio or request.images or request.documents:
         return "multimodal"
 
     return "document"
@@ -281,9 +284,10 @@ def build_graph():
 
     graph = StateGraph(AgentState)
 
-    graph.add_node("router", router_node)
+
     graph.add_node("context", context_node)
     graph.add_node("resolver", resolver_node)
+    graph.add_node("router", router_node)
     graph.add_node("dispatcher", dispatcher_node)
     graph.add_node("document", document_node)
     graph.add_node("image", image_node)
@@ -292,10 +296,10 @@ def build_graph():
     graph.add_node("general", general_node)
     graph.add_node("reflect", reflect_node)
 
-    graph.set_entry_point("router")
-    graph.add_edge("router", "context")
+    graph.set_entry_point("context")
     graph.add_edge("context", "resolver")
-    graph.add_edge("resolver", "dispatcher")
+    graph.add_edge("resolver", "router")  # reordered
+    graph.add_edge("router", "dispatcher")
 
     graph.add_conditional_edges("dispatcher", dispatch_branch, {
         "document": "document",
