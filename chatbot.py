@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
-from models import Message, User, ChatSession
+from models import Message, ChatSession, UserDocument, SessionDocument
 from schemas import *
 import shutil
 from database import get_db, engine, Base
@@ -12,6 +12,7 @@ from auth import *
 from LLM import initialize_hf_llm, HF_LLM
 from index_embedd import initialize, save, load
 import uvicorn
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -132,10 +133,17 @@ def delete_chat(session_id: str, current_user = Depends(get_current_user), db = 
         raise HTTPException(404, "Session not found")
 
     db.query(Message).filter(Message.session_id == session_id).delete()
-    # db.query(SessionDocument).filter(SessionDocument.session_id == session_id).delete()
+    db.query(SessionDocument).filter(SessionDocument.session_id == session_id).delete()
     db.delete(session)
     db.commit()
     return {"deleted": session_id}
+
+
+@app.get("/documents")
+def list_documents(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+
+    rows = db.query(UserDocument).filter(UserDocument.user_id == current_user.id).all()
+    return [{"doc_id": r.doc_id, "filename": r.filename, "kind": r.kind, "path": r.path} for r in rows]
 
 
 if __name__ == "__main__":

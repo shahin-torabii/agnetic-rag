@@ -133,6 +133,12 @@ def sidebar():
                     st.rerun()
 
         st.divider()
+        st.caption("Your files (across all chats)")
+        user_docs = api_get("/documents", headers=auth_headers()) or []
+        for d in user_docs:
+            st.text(f"{d['filename']} ({d['kind']})")
+
+        st.divider()
 
         st.caption("Attach files to your next message")
         uploaded = st.file_uploader("Documents, images, or audio", accept_multiple_files=True, key="Uploader")
