@@ -30,6 +30,7 @@ class AgentState:
     ctx: Optional[QueryContext] = None
     intent: Optional[Intent] = None
     active_ctx: Any = None
+    session_ctx: Any = None
     target_files: Any = None
     k: int = 10
     result: Any = None

@@ -10,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from functools import lru_cache
 from handlers import make_doc_id
+from models import SessionDocument
 
 class Intent(str, Enum):
     GENERAL_CHAT = "GENERAL_CHAT"
@@ -62,6 +63,15 @@ class ActiveContext:
     active_documents: Set[str] = field(default_factory=set)
     active_images: Set[str] = field(default_factory=set)
     active_audio: Set[str] = field(default_factory=set)
+
+
+@dataclass
+class SessionContext:
+    session_documents: Set[str] = field(default_factory=set)
+    session_images: Set[str] = field(default_factory=set)
+    session_audio: Set[str] = field(default_factory=set)
+
+
 
 
 ROUTER_SYSTEM_PROMPT = """You are an intent classifier for a multimodal RAG system.
@@ -477,6 +487,21 @@ def build_active_context(request: UserRequest, user_id: str) -> ActiveContext:
         ctx.active_images = {make_doc_id(user_id, i) for i in request.images}
     if has_docs:
         ctx.active_documents = {make_doc_id(user_id, d) for d in request.documents}
+    return ctx
+
+
+def build_session_context(session_id: str, user_id: str, db) -> SessionContext:
+    rows = db.query(SessionDocument).filter(
+        SessionDocument.session_id == session_id, SessionDocument.user_id == user_id
+    ).all()
+    ctx = SessionContext()
+    for r in rows:
+        if r.kind == "document":
+            ctx.session_documents.add(r.doc_id)
+        elif r.kind == "image":
+            ctx.session_images.add(r.doc_id)
+        elif r.kind == "audio":
+            ctx.session_audio.add(r.doc_id)
     return ctx
 
 

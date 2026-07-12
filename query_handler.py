@@ -12,7 +12,7 @@ import puremagic
 from handlers import *
 from resolver import resolve
 from typing import List
-from models import UserDocument
+from models import UserDocument, SessionDocument
 from handlers import make_doc_id
 
 AUDIO_TRANSCRIPT = None
@@ -476,7 +476,17 @@ def _record_user_document(db, user_id, doc_id, filename, kind, meta=None):
     db.refresh(user_doc)
 
 
-def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_session=None):
+def _record_session_document(db_session, session_id, user_id, doc_id, kind):
+    existing = db_session.query(SessionDocument).filter(
+        SessionDocument.session_id == session_id, SessionDocument.doc_id == doc_id
+    ).first()
+    if existing:
+        return
+    db_session.add(SessionDocument(session_id=session_id, user_id=user_id, doc_id=doc_id, kind=kind))
+    db_session.commit()
+
+
+def handle_uploads(request: UserRequest, active_ctx, session_id: str, user_id: str = "1", db_session=None):
     global AUDIO_TRANSCRIPT
 
     if not active_ctx.has_file:
@@ -500,6 +510,7 @@ def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_sess
 
             if db_session is not None:
                 _record_user_document(db_session, user_id, doc_id, Path(doc_path).name, "document", meta)
+                _record_session_document(db_session, session_id, user_id, doc_id, "document")
 
     if request.audio:
         transcripts = []
@@ -521,7 +532,7 @@ def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_sess
 
             if db_session is not None:
                 _record_user_document(db_session, user_id, doc_id, Path(audio_path).name, "audio", meta)
-
+                _record_session_document(db_session, session_id, user_id, doc_id, "audio")
         if transcripts:
             AUDIO_TRANSCRIPT = transcripts
 
@@ -531,6 +542,7 @@ def handle_uploads(request: UserRequest, active_ctx, user_id: str = "1", db_sess
             for img_path in request.images:
                 doc_id = make_doc_id(user_id, img_path)
                 _record_user_document(db_session, user_id, doc_id, Path(img_path).name, "image")
+                _record_session_document(db_session, session_id, user_id, doc_id, "image")
 
     save(PERSIST_DIR)
 
