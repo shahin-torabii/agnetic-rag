@@ -10,7 +10,7 @@ from pathlib import Path
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from models import UserDocument
-from query_router import ActiveContext
+from query_router import ActiveContext, SessionContext
 from sqlalchemy.orm import Session
 
 REFERENCE_RESOLVER_SYSTEM_PROMPT = """You are a file reference resolver.
@@ -24,6 +24,8 @@ The user may refer to:
 - both
 
 You may ONLY return files that exist in the provided candidate lists.
+Do NOT extract name or part of what is in the provided candidate lists. Return exactly the file naming 
+provided in the candidate lists.
 
 Return ONLY valid JSON.
 
@@ -139,9 +141,11 @@ def normalize_name(name: str) -> str:
     return name.strip()
 
 
-def resolve_ordinals(query: str, active_ctx: ActiveContext) -> list[str]:
+def resolve_ordinals(query: str, active_ctx, session_ctx) -> list[str]:
     q = query.lower()
-    active_docs = list(active_ctx.active_documents.union(active_ctx.active_audio))
+    active_docs = list(active_ctx.active_documents | active_ctx.active_audio)
+    if not active_docs:
+        active_docs = list(session_ctx.session_documents | session_ctx.session_audio)
     matched = []
     for signal, idx in ORDINAL_SIGNALS.items():
         if signal in q and idx < len(active_docs):
@@ -175,7 +179,7 @@ def contains_signal(query: str, signals: set[str]) -> bool:
     return any(signal.lower() in q for signal in signals)
 
 
-def resolve_targets(query: str, active_ctx, user_id: str, db_session) -> ResolvedTargets:
+def resolve_targets(query: str, active_ctx: ActiveContext, session_ctx: SessionContext, user_id: str, db_session) -> ResolvedTargets:
     result = ResolvedTargets()
     q = query.lower()
 
@@ -183,18 +187,21 @@ def resolve_targets(query: str, active_ctx, user_id: str, db_session) -> Resolve
     if explicit_docs:
         result.documents.extend(explicit_docs)
 
-    if contains_signal(q, CURRENT_FILE_SIGNALS):
+    if active_ctx.active_documents or active_ctx.active_images or active_ctx.active_audio:
         result.documents.extend(active_ctx.active_documents)
         result.documents.extend(active_ctx.active_audio)
         result.images.extend(active_ctx.active_images)
+    else:
+        result.documents.extend(session_ctx.session_documents)
+        result.documents.extend(session_ctx.session_audio)
+        result.images.extend(session_ctx.session_images)
 
     if contains_signal(q, ALL_FILES_SIGNALS):
-        result.documents.extend(user_doc_ids(user_id, db_session))
+        result.documents.extend(user_doc_ids(user_id, db_session))  # user scope: every chat
 
     result.documents = list(set(result.documents))
     result.images = list(set(result.images))
     result.confidence = 0.9 if (result.documents or result.images) else 0.3
-
     return result
 
 
@@ -264,12 +271,13 @@ Return JSON only."""
 
 
 
-def resolve(request: UserRequest, active_ctx, user_id: str, db: Session) -> ResolvedTargets:
+def resolve(request: UserRequest, active_ctx, session_ctx,user_id: str, db: Session) -> ResolvedTargets:
     query = request.query
-    resolved = resolve_targets(query, active_ctx, user_id, db)
+    resolved = resolve_targets(query, active_ctx, session_ctx,user_id, db)
 
-    if resolved.confidence < 0.6 and active_ctx.active_documents:
-        ordinal_docs = resolve_ordinals(query, active_ctx)
+    has_scope = bool(active_ctx.active_documents or session_ctx.session_documents)
+    if resolved.confidence < 0.6 and has_scope:
+        ordinal_docs = resolve_ordinals(query, active_ctx, session_ctx)
         if ordinal_docs:
             resolved.documents.extend(ordinal_docs)
             resolved.documents = list(set(resolved.documents))
