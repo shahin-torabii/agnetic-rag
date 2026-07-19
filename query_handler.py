@@ -133,8 +133,7 @@ def handle_image(intent, request, target_files, k = 5):
                 response = send_images_to_vlm(image_paths, request.query)
                 return response
             else:
-                result = retrieval(request.query, k=k, is_doc=False,  allowed_doc_ids=set(target_files.images))
-                context = build_context(result)
+                context = retrieval(request.query, k=k, is_doc=False,  allowed_doc_ids=set(target_files.images))
                 final_answer = final_rag_llm(request.query, context)
                 return final_answer
 
@@ -171,8 +170,7 @@ def handle_audio(intent, request, target_files, k = 10):
             return audio_transcript
 
         case Intent.AUDIO_QA:
-            result = retrieval(query=request.query, k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
-            context = build_context(result)
+            context = retrieval(query=request.query, k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
             final_answer = final_rag_llm(request.query, context)
             return final_answer
 
@@ -220,10 +218,9 @@ def handle_document(intent, request, target_files, k = 10):
             return "\n\n".join(summaries)
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
-            result = retrieval(query=request.query, k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
+            context = retrieval(query=request.query, k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
             print("\n\n")
-            print(result)
-            context = build_context(result)
+            print(context)
             final_answer = final_rag_llm(request.query, context)
             return final_answer
 
@@ -344,17 +341,12 @@ def handle_multimodal(intent, request, target_files, k = 10):
 
         case Intent.DOCUMENT_QA | Intent.SEARCH_DOCUMENT:
 
-            doc_res = retrieval(query=request.query,k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
-            doc_context = build_context(doc_res)
+            doc_context = retrieval(query=request.query,k=k, is_doc=True,  allowed_doc_ids=set(target_files.documents))
             final_doc_answer = final_rag_llm(request.query, doc_context)
 
-            image_res = handle_image(Intent.IMAGE_SEARCH, request, images, k )
-            im_context = build_context(image_res)
-            final_im_answer = final_rag_llm(request.query, im_context)
+            final_im_answer = handle_image(Intent.IMAGE_SEARCH, request, images, k)
 
-            audio_res = handle_audio(Intent.AUDIO_QA, request, audios, k )
-            audio_context = build_context(audio_res)
-            final_audio_answer = final_rag_llm(request.query, audio_context)
+            final_audio_answer = handle_audio(Intent.AUDIO_QA, request, audios, k)
 
             results ={
                 "docs": final_doc_answer,
