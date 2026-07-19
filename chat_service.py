@@ -24,7 +24,7 @@ def load_recent_history(db: Session, session_id: str, limit: int = 8)-> List[Mes
 
     messages = (db.query(Message).filter(Message.session_id == session_id)
                 .order_by(Message.created_at.desc())
-                .limit(limit))
+                .limit(limit).all())
 
     return list(reversed(messages))
 

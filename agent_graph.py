@@ -6,7 +6,7 @@ from langgraph.graph import StateGraph, END
 from index_embedd import VectorStore
 from query_router import (
     Intent, QueryContext, classify_query, llm_router,
-    ActiveContext, build_active_context
+    ActiveContext, build_active_context, build_session_context
 )
 from resolver import resolve
 from data_gathering import Data, UserRequest
@@ -114,12 +114,15 @@ def split_resolved_kinds(target_files):
 
 def context_node(state: AgentState) -> AgentState:
     state.active_ctx = build_active_context(state.request, state.user_id)
-    handle_uploads(state.request, state.active_ctx, state.user_id, state.db)
+    handle_uploads(state.request, state.active_ctx, state.session_id, state.user_id, state.db)
+    state.session_ctx = build_session_context(state.session_id, state.user_id, state.db)
     return state
 
 
 def resolver_node(state: AgentState) -> AgentState:
-    state.target_files = resolve(state.request, state.active_ctx, state.user_id, state.db)
+    state.target_files = resolve(
+        state.request, state.active_ctx, state.session_ctx, state.user_id, state.db
+    )
     return state
 
 

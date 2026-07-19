@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from models import Message, ChatSession, UserDocument, SessionDocument
 from schemas import *
 import shutil
@@ -15,6 +16,19 @@ import uvicorn
 
 
 Base.metadata.create_all(bind=engine)
+
+def _migrate():
+    with engine.connect() as conn:
+        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(user_documents)"))]
+        if "path" not in cols:
+            conn.execute(text("ALTER TABLE user_documents ADD COLUMN path VARCHAR"))
+        if "title" not in cols:
+            conn.execute(text("ALTER TABLE user_documents ADD COLUMN title VARCHAR DEFAULT ''"))
+        if "doc_type" not in cols:
+            conn.execute(text("ALTER TABLE user_documents ADD COLUMN doc_type VARCHAR DEFAULT 'GENERAL'"))
+        conn.commit()
+
+_migrate()
 
 
 PERSIST_DIR = "storage"
@@ -31,6 +45,8 @@ async def lifespan(app: FastAPI):
     yield  # Application runs here
     save(PERSIST_DIR)
     print("shutting down")
+
+
 app = FastAPI(title="agentic-rag chatbot",lifespan=lifespan)
 
 UPLOAD_DIR = "uploads"

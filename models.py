@@ -19,7 +19,7 @@ class User(Base):
 
 
 class UserDocument(Base):
-    __tablename__ = "user_document"
+    __tablename__ = "user_documents"
 
     id = Column(String, primary_key=True, default=gen_id)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)

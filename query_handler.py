@@ -487,6 +487,8 @@ def _record_session_document(db_session, session_id, user_id, doc_id, kind):
 
 
 def handle_uploads(request: UserRequest, active_ctx, session_id: str, user_id: str = "1", db_session=None):
+    print(f"[handle_uploads] has_file={active_ctx.has_file} docs={request.documents} imgs={request.images}")
+
     global AUDIO_TRANSCRIPT
 
     if not active_ctx.has_file:
@@ -496,20 +498,17 @@ def handle_uploads(request: UserRequest, active_ctx, session_id: str, user_id: s
         for doc_path in request.documents:
             doc_id = make_doc_id(user_id, doc_path)
 
-            if doc_id in Data.docs:
-                print(f"skip already-ingested doc: {doc_id}")
-                continue
+            if doc_id not in Data.docs:
+                chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
+                meta.doc_id = doc_id
+                for c in chunks:
+                    c.doc_id = doc_id
 
-            chunks, meta, img_idx, tbl_idx = get_doc_chunks(doc_path)
-            meta.doc_id = doc_id
-            for c in chunks:
-                c.doc_id = doc_id
-
-            ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
-            index_to_faiss(chunks)
+                ingest(chunks, meta, img_to_ch=img_idx, tbl_to_ch=tbl_idx)
+                index_to_faiss(chunks)
 
             if db_session is not None:
-                _record_user_document(db_session, user_id, doc_id, Path(doc_path).name, "document", meta)
+                _record_user_document(db_session, user_id, doc_id, Path(doc_path).name, "document", Data.docs.get(doc_id))
                 _record_session_document(db_session, session_id, user_id, doc_id, "document")
 
     if request.audio:
@@ -517,21 +516,18 @@ def handle_uploads(request: UserRequest, active_ctx, session_id: str, user_id: s
         for audio_path in request.audio:
             doc_id = make_doc_id(user_id, audio_path)
 
-            if doc_id in Data.docs:
-                print(f"skip already-ingested audio: {doc_id}")
-                continue
+            if doc_id not in Data.docs:
+                chunks, transcript, meta = process_audio(audio_path)
+                meta.doc_id = doc_id
+                for c in chunks:
+                    c.doc_id = doc_id
 
-            chunks, transcript, meta = process_audio(audio_path)
-            meta.doc_id = doc_id
-            for c in chunks:
-                c.doc_id = doc_id
-
-            ingest(chunks=chunks, doc_meta=meta, img_to_ch=None, tbl_to_ch=None)
-            transcripts.append(transcript)
-            index_to_faiss(chunks)
+                ingest(chunks=chunks, doc_meta=meta, img_to_ch=None, tbl_to_ch=None)
+                transcripts.append(transcript)
+                index_to_faiss(chunks)
 
             if db_session is not None:
-                _record_user_document(db_session, user_id, doc_id, Path(audio_path).name, "audio", meta)
+                _record_user_document(db_session, user_id, doc_id, Path(audio_path).name, "audio", Data.docs.get(doc_id))
                 _record_session_document(db_session, session_id, user_id, doc_id, "audio")
         if transcripts:
             AUDIO_TRANSCRIPT = transcripts

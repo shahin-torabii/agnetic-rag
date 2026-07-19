@@ -50,6 +50,9 @@ def api_get(path, headers=None):
     except requests.exceptions.ConnectionError:
         st.error("Can't reach the backend. Is it running on http://127.0.0.1:8000 ?")
         return None
+    except Exception as e:
+        st.error(f"{path} error: {e}")
+        return None
 
 
 def api_delete(path, headers=None):
@@ -136,6 +139,7 @@ def sidebar():
         st.caption("Your files (across all chats)")
         user_docs = api_get("/documents", headers=auth_headers()) or []
         for d in user_docs:
+            print(d)
             st.text(f"{d['filename']} ({d['kind']})")
 
         st.divider()

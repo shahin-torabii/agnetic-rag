@@ -22,15 +22,19 @@ class HF_LLM:
     #vision_model_name = "CohereLabs/aya-vision-32b"
     # vision_model_name = "HuggingFaceM4/idefics2-8b"
     # fast_model_name= "Qwen/Qwen2.5-7B-Instruct"
-    strong_model_name = "google/gemma-4-31b-it:free"
+    #strong_model_name = "google/gemma-4-31b-it:free"
     # base_url="https://router.huggingface.co/v1"
 
     #strong_model_name = "meta-llama/llama-3.3-70b-instruct:free"
-
+    #fast_model_name = "meta-llama/llama-3.3-70b-instruct:free"
+    strong_model_name = "poolside/laguna-xs-2.1:free"
+    #fast_model_name = "liquid/lfm-2.5-1.2b-instruct:free"
     #strong_model_name = "liquid/lfm-2.5-1.2b-instruct:free"
-    fast_model_name = "liquid/lfm-2.5-1.2b-instruct:free"
+    fast_model_name = "poolside/laguna-xs-2.1:free"
+    #vision_model_name = "nvidia/llama-nemotron-rerank-vl-1b-v2:free"
     vision_model_name = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
     base_url = "https://openrouter.ai/api/v1"
+
 
 
 def set_environ():
@@ -60,6 +64,8 @@ def create_HF_client():
         api_key=HF_LLM.api_key,
         base_url=HF_LLM.base_url,
         temperature=0,
+    ).with_retry(
+        stop_after_attempt=3
     )
     HF_LLM.vision_llm = ChatOpenAI(
         model=HF_LLM.vision_model_name,

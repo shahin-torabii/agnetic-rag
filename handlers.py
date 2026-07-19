@@ -388,7 +388,7 @@ def _get_rewrite_with_history_chain():
 
 
 def rewrite_query_with_history(query, history):
-    return _get_rewrite_with_history_chain().invoke({"query": query, "history": history}).strip
+    return _get_rewrite_with_history_chain().invoke({"query": query, "history": history}).strip()
 
 
 def make_doc_id(user_id: str, filename_or_path: str) -> str:
