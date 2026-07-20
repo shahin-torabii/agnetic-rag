@@ -1,0 +1,5 @@
+# Prod environment overrides
+# Inherits everything from base.yaml, override only what differs
+
+llm:
+  temperature: 0.0

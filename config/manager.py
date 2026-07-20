@@ -1,0 +1,98 @@
+"""Configuration manager for the RAG chatbot
+
+Reads config/base.yaml as the foundation, overlays env-specific overrides
+from config/dev.yaml or config/prod.yaml (controlled by APP_ENV env var),
+then returns a frozen AppConfig dataclass. Missing keys fall back to
+dataclass defaults.
+"""
+
+import os
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+from config.schema import AppConfig, LLMConfig, ChunkingConfig, RetrievalConfig, DBConfig
+
+
+_CONFIG_DIR = Path(__file__).resolve().parent
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base, returning a new dict."""
+    merged = {}
+    all_keys = set(base) | set(override)
+    for key in all_keys:
+        if key in base and key in override:
+            if isinstance(base[key], dict) and isinstance(override[key], dict):
+                merged[key] = _deep_merge(base[key], override[key])
+            else:
+                merged[key] = override[key]
+        elif key in override:
+            merged[key] = override[key]
+        else:
+            merged[key] = base[key]
+    return merged
+
+
+def _load_yaml(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _build_app_config(raw: dict) -> AppConfig:
+    llm_raw = raw.get("llm", {})
+    chunking_raw = raw.get("chunking", {})
+    retrieval_raw = raw.get("retrieval", {})
+    db_raw = raw.get("db", {})
+
+    return AppConfig(
+        llm=LLMConfig(
+            strong_model=llm_raw.get("strong_model", "Qwen/Qwen3-8B"),
+            fast_model=llm_raw.get("fast_model", "Qwen/Qwen3-4B"),
+            vision_model=llm_raw.get("vision_model", "Qwen/Qwen3-8B"),
+            embedding_model=llm_raw.get("embedding_model", "BAAI/bge-small-en-v1.5"),
+            server_url=llm_raw.get("server_url", "http://127.0.0.1:8080/v1"),
+            temperature=llm_raw.get("temperature", 0.1),
+            max_tokens=llm_raw.get("max_tokens", 2048),
+            timeout=llm_raw.get("timeout", 600),
+        ),
+        chunking=ChunkingConfig(
+            max_tokens=chunking_raw.get("max_tokens", 500),
+            overlap_tokens=chunking_raw.get("overlap_tokens", 60),
+            image_max_tokens=chunking_raw.get("image_max_tokens", 2000),
+            header_window_lines=chunking_raw.get("header_window_lines", 5),
+            min_chunk_len=chunking_raw.get("min_chunk_len", 5),
+        ),
+        retrieval=RetrievalConfig(
+            text_k=retrieval_raw.get("text_k", 15),
+            image_k=retrieval_raw.get("image_k", 15),
+            chunk_image_k=retrieval_raw.get("chunk_image_k", 15),
+            top_k=retrieval_raw.get("top_k", 5),
+            score_threshold=retrieval_raw.get("score_threshold", 0.05),
+            alpha=retrieval_raw.get("alpha", 0.5),
+        ),
+        db=DBConfig(
+            db_url=db_raw.get("db_url", "sqlite:///./chatbot.db"),
+            postgres_user=db_raw.get("postgres_user", ""),
+            postgres_password=db_raw.get("postgres_password", ""),
+            postgres_db=db_raw.get("postgres_db", ""),
+        ),
+        cors_origins=raw.get("cors_origins", ["http://localhost:8501"]),
+        vector_db_path=raw.get("vector_db_path", "storage"),
+        backend_api_url=raw.get("backend_api_url", "http://127.0.0.1:8000"),
+    )
+
+
+def get_config(env: Optional[str] = None) -> AppConfig:
+    env = env or os.getenv("APP_ENV", "dev")
+
+    base = _load_yaml(_CONFIG_DIR / "base.yaml")
+
+    env_file = "prod.yaml" if env == "prod" else "dev.yaml"
+    overrides = _load_yaml(_CONFIG_DIR / env_file)
+
+    merged = _deep_merge(base, overrides)
+    return _build_app_config(merged)

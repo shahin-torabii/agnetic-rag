@@ -1,0 +1,35 @@
+# Base configuration for the RAG Chatbot
+
+llm:
+  strong_model: "Qwen/Qwen3-8B"
+  fast_model: "Qwen/Qwen3-4B"
+  embedding_model: "BAAI/bge-small-en-v1.5"
+  server_url: "http://127.0.0.1:8080/v1"
+  temperature: 0.1
+  max_tokens: 2048
+  timeout: 600
+
+chunking:
+  max_tokens: 500
+  overlap_tokens: 60
+  image_max_tokens: 2000
+  header_window_lines: 5
+  min_chunk_len: 5
+
+retrieval:
+  text_k: 15
+  image_k: 15
+  chunk_image_k: 15
+  top_k: 5
+  score_threshold: 0.05
+  alpha: 0.5
+
+db:
+  db_url: "sqlite:///./chatbot.db"
+
+cors_origins:
+  - "http://localhost:8501"
+
+vector_db_path: "storage"
+
+backend_api_url: "http://127.0.0.1:8000"
