@@ -42,6 +42,10 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(f) or {}
 
 
+def _from_env(key: str, fallback: str) -> str:
+    return os.getenv(key, fallback)
+
+
 def _build_app_config(raw: dict) -> AppConfig:
     llm_raw = raw.get("llm", {})
     chunking_raw = raw.get("chunking", {})
@@ -50,39 +54,39 @@ def _build_app_config(raw: dict) -> AppConfig:
 
     return AppConfig(
         llm=LLMConfig(
-            strong_model=llm_raw.get("strong_model", "Qwen/Qwen3-8B"),
-            fast_model=llm_raw.get("fast_model", "Qwen/Qwen3-4B"),
-            vision_model=llm_raw.get("vision_model", "Qwen/Qwen3-8B"),
-            embedding_model=llm_raw.get("embedding_model", "BAAI/bge-small-en-v1.5"),
-            server_url=llm_raw.get("server_url", "http://127.0.0.1:8080/v1"),
-            temperature=llm_raw.get("temperature", 0.1),
-            max_tokens=llm_raw.get("max_tokens", 2048),
-            timeout=llm_raw.get("timeout", 600),
+            strong_model=_from_env("STRONG_MODEL", llm_raw.get("strong_model", "Qwen/Qwen3-8B")),
+            fast_model=_from_env("FAST_MODEL", llm_raw.get("fast_model", "Qwen/Qwen3-4B")),
+            vision_model=_from_env("VISION_MODEL", llm_raw.get("vision_model", "Qwen/Qwen3-8B")),
+            embedding_model=_from_env("EMBEDDING_MODEL", llm_raw.get("embedding_model", "BAAI/bge-small-en-v1.5")),
+            server_url=_from_env("LLM_SERVER_URL", llm_raw.get("server_url", "http://127.0.0.1:8080/v1")),
+            temperature=float(_from_env("LLM_TEMPERATURE", str(llm_raw.get("temperature", 0.1)))),
+            max_tokens=int(_from_env("LLM_MAX_TOKENS", str(llm_raw.get("max_tokens", 2048)))),
+            timeout=int(_from_env("LLM_TIMEOUT", str(llm_raw.get("timeout", 600)))),
         ),
         chunking=ChunkingConfig(
-            max_tokens=chunking_raw.get("max_tokens", 500),
-            overlap_tokens=chunking_raw.get("overlap_tokens", 60),
-            image_max_tokens=chunking_raw.get("image_max_tokens", 2000),
-            header_window_lines=chunking_raw.get("header_window_lines", 5),
-            min_chunk_len=chunking_raw.get("min_chunk_len", 5),
+            max_tokens=int(_from_env("CHUNK_MAX_TOKENS", str(chunking_raw.get("max_tokens", 500)))),
+            overlap_tokens=int(_from_env("CHUNK_OVERLAP_TOKENS", str(chunking_raw.get("overlap_tokens", 60)))),
+            image_max_tokens=int(_from_env("CHUNK_IMAGE_MAX_TOKENS", str(chunking_raw.get("image_max_tokens", 2000)))),
+            header_window_lines=int(_from_env("CHUNK_HEADER_WINDOW_LINES", str(chunking_raw.get("header_window_lines", 5)))),
+            min_chunk_len=int(_from_env("CHUNK_MIN_LEN", str(chunking_raw.get("min_chunk_len", 5)))),
         ),
         retrieval=RetrievalConfig(
-            text_k=retrieval_raw.get("text_k", 15),
-            image_k=retrieval_raw.get("image_k", 15),
-            chunk_image_k=retrieval_raw.get("chunk_image_k", 15),
-            top_k=retrieval_raw.get("top_k", 5),
-            score_threshold=retrieval_raw.get("score_threshold", 0.05),
-            alpha=retrieval_raw.get("alpha", 0.5),
+            text_k=int(_from_env("RETRIEVAL_TEXT_K", str(retrieval_raw.get("text_k", 15)))),
+            image_k=int(_from_env("RETRIEVAL_IMAGE_K", str(retrieval_raw.get("image_k", 15)))),
+            chunk_image_k=int(_from_env("RETRIEVAL_CHUNK_IMAGE_K", str(retrieval_raw.get("chunk_image_k", 15)))),
+            top_k=int(_from_env("RETRIEVAL_TOP_K", str(retrieval_raw.get("top_k", 5)))),
+            score_threshold=float(_from_env("RETRIEVAL_SCORE_THRESHOLD", str(retrieval_raw.get("score_threshold", 0.05)))),
+            alpha=float(_from_env("RETRIEVAL_ALPHA", str(retrieval_raw.get("alpha", 0.5)))),
         ),
         db=DBConfig(
-            db_url=db_raw.get("db_url", "sqlite:///./chatbot.db"),
-            postgres_user=db_raw.get("postgres_user", ""),
-            postgres_password=db_raw.get("postgres_password", ""),
-            postgres_db=db_raw.get("postgres_db", ""),
+            db_url=_from_env("DATABASE_URL", db_raw.get("db_url", "sqlite:///./chatbot.db")),
+            postgres_user=_from_env("POSTGRES_USER", db_raw.get("postgres_user", "")),
+            postgres_password=_from_env("POSTGRES_PASSWORD", db_raw.get("postgres_password", "")),
+            postgres_db=_from_env("POSTGRES_DB", db_raw.get("postgres_db", "")),
         ),
         cors_origins=raw.get("cors_origins", ["http://localhost:8501"]),
-        vector_db_path=raw.get("vector_db_path", "storage"),
-        backend_api_url=raw.get("backend_api_url", "http://127.0.0.1:8000"),
+        vector_db_path=_from_env("VECTOR_DB_PATH", raw.get("vector_db_path", "storage")),
+        backend_api_url=_from_env("BACKEND_API_URL", raw.get("backend_api_url", "http://127.0.0.1:8000")),
     )
 
 

@@ -1,0 +1,17 @@
+.venv
+__pycache__
+.git
+.gitignore
+.env
+.idea
+*.db
+storage/
+vector_db/
+*.pkl
+*.index
+test.ipynb
+audio_test.ipynb
+*.png
+architecture/
+experiments/
+node_modules

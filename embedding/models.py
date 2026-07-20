@@ -1,6 +1,6 @@
+import os
 import faiss
 import numpy as np
-import os
 import pickle
 from pathlib import Path
 
@@ -10,7 +10,7 @@ from core.types import Data
 logger = get_logger(__name__)
 
 
-SERVER_URL = "http://127.0.0.1:8000"
+SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://127.0.0.1:8001")
 
 class Models:
     e5_model = None

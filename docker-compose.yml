@@ -1,0 +1,45 @@
+services:
+
+  model-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.model_server
+    ports:
+      - "8001:8001"
+    volumes:
+      - model_cache:/root/.cache
+    environment:
+      - TORCH_HOME=/root/.cache/torch
+    restart: unless-stopped
+
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - chatbot_data:/app
+    environment:
+      - MODEL_SERVER_URL=http://model-server:8001
+      - APP_ENV=production
+      - LLM_SERVER_URL=http://model-server:8001/v1
+      - BACKEND_API_URL=http://backend:8000
+    depends_on:
+      - model-server
+    restart: unless-stopped
+
+  frontend:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    command: >
+      streamlit run frontend/streamlit_app.py
+      --server.address=0.0.0.0 --server.port=8501
+
+volumes:
+  model_cache:
+  chatbot_data:
