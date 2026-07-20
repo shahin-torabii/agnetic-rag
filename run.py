@@ -5,7 +5,7 @@ import time
 
 
 def _kill_port(port: int):
-    """Kill any process already listening on the given port."""
+
     try:
         if sys.platform == "win32":
             result = subprocess.run(
@@ -39,7 +39,7 @@ def _wait_for_port(port: int, timeout: int = 120, label: str = ""):
 
 
 def main():
-    # Kill stale processes from any previous run
+
     print("Clearing ports 8000 and 8001...")
     for port in (8000, 8001):
         _kill_port(port)

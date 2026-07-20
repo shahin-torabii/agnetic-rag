@@ -4,6 +4,7 @@ import requests
 
 from config.manager import get_config
 from core.logger import get_logger
+from core.mlflow_tracking import log_metrics
 from core.types import Data
 from embedding.models import VectorStore, SERVER_URL
 
@@ -182,15 +183,18 @@ def retrieval_text(query: str, k: int = None,
     reranked_results = rerank(query=query, chunks=primary_results, threshold=-50)
 
     if reranked_results and reranked_results[0]["score"] >= min_threshold:
+        log_metrics({"retrieval_high_confidence": 1, "retrieval_count": len(reranked_results)})
         logger.info("High confidence results matched")
         return reranked_results
 
     new_query = improve_query(query)
+    log_metrics({"retrieval_query_expansion": 1})
     logger.info("Activating query expansion fallback", extra={"expanded_query": new_query})
 
     fallback_candidates = search_text(new_query, k=k, oversample_factor=4, allowed_doc_ids=allowed_doc_ids)
     final_res = rerank(query=new_query, chunks=fallback_candidates,
                   top_k=k, threshold=0.0)
+    log_metrics({"retrieval_fallback_count": len(final_res)})
 
     return final_res
 

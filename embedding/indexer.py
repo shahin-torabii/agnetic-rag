@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import List
 
+from core.mlflow_tracking import log_metrics
 from core.types import Chunk, Data
 from embedding.models import VectorStore, initialize, SERVER_URL
 
@@ -84,6 +85,7 @@ def index_chunks(chunks: List[Chunk]):
     VectorStore.text_index = text_index
     VectorStore.text_meta = text_meta
     VectorStore.indexed_chunks = indexed_chunks
+    log_metrics({"index_chunks_added": len(new_chunks), "index_total": text_index.ntotal})
 
 
 def index_chunk_images(chunks: List[Chunk]):

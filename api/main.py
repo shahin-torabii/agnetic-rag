@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from config.manager import get_config
 from core.logger import get_logger
+from core.mlflow_tracking import start_run, log_params, log_metrics
 from core.schemas import (
     ChatRequest,
     ChatResponse,
@@ -61,12 +62,15 @@ _migrate()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    initialize()
-    initialize_hf_llm()
-    load(config.vector_db_path)
-    logger.info("LLM initialized", extra={"model": str(HF_LLM.fast_llm)})
+    with start_run(run_name="api_startup"):
+        log_params({"vector_db_path": config.vector_db_path, "llm_server": config.llm.server_url})
+        initialize()
+        initialize_hf_llm()
+        load(config.vector_db_path)
+        log_params({"model_loaded": str(HF_LLM.fast_llm) is not None})
     yield
     save(config.vector_db_path)
+    log_metrics({"vector_store_saved": 1})
     logger.info("Shutting down")
 
 

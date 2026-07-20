@@ -8,19 +8,25 @@ from typing import List
 import numpy as np
 from PIL import Image
 
+from core.mlflow_tracking import start_run, log_params
+
 app = FastAPI(title="models server")
 
 
-print("Loading models ...", flush=True)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-e5_model = SentenceTransformer("intfloat/multilingual-e5-base", device=device)
-
-clip_model, _, clip_preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="laion2b_s34b_b79k", device=device)
-clip_model.eval()
-
-reranker = CrossEncoder("BAAI/bge-reranker-base", device=device, trust_remote_code=True)
-print("All models loaded successfully and serving!", flush=True)
+with start_run(run_name="model_loading"):
+    log_params({
+        "device": device,
+        "e5_model": "intfloat/multilingual-e5-base",
+        "clip_model": "ViT-B-32",
+        "clip_pretrained": "laion2b_s34b_b79k",
+        "reranker": "BAAI/bge-reranker-base",
+    })
+    e5_model = SentenceTransformer("intfloat/multilingual-e5-base", device=device)
+    clip_model, _, clip_preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="laion2b_s34b_b79k", device=device)
+    clip_model.eval()
+    reranker = CrossEncoder("BAAI/bge-reranker-base", device=device, trust_remote_code=True)
 
 
 class TextEmbeddingRequest(BaseModel):
