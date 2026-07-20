@@ -13,6 +13,9 @@ from analysis.handlers import (
 )
 from config.manager import get_config
 from core.constants import GROUP_SIZE, MAX_RETRIES, RETRY_WAIT_SECONDS, TOKENS_PER_BATCH
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 from core.types import Chunk, Data, Intent, UserRequest, ingest
 from embedding.indexer import (
     get_image_id,
@@ -178,11 +181,7 @@ def handle_document(intent, request, target_files, k=None):
                     related_chunks[doc_id], related_docs[doc_id], full_summary=True
                 )
                 summaries.append(summary)
-            print("\n\n".join(summaries))
-            print("\n\n\n")
-            print("-" * 50)
-            print("final summary")
-            print(summaries)
+            logger.debug("Document summaries generated", extra={"count": len(summaries)})
             return "\n\n".join(summaries)
 
         case Intent.DOCUMENT_SECTION_SUMMARIZE:
@@ -205,8 +204,7 @@ def handle_document(intent, request, target_files, k=None):
                 is_doc=True,
                 allowed_doc_ids=set(target_files.documents),
             )
-            print("\n\n")
-            print(result)
+            logger.debug("Retrieval result", extra={"chunks_count": len(result) if result else 0})
             context = build_context(result)
             final_answer = final_rag_llm(request.query, context)
             return final_answer
@@ -216,10 +214,7 @@ def handle_document(intent, request, target_files, k=None):
             for doc_id in target_files.documents:
                 overview = overview_func(related_chunks[doc_id], related_docs[doc_id])
                 over_views.append(overview)
-            print("\n\n\n")
-            print("-" * 50)
-            print("final explanation")
-            print("\n\n".join(over_views))
+            logger.debug("Document overviews generated", extra={"count": len(over_views)})
             return "\n\n".join(over_views)
 
         case Intent.DOCUMENT_FULL_EXPLAIN:
@@ -229,10 +224,7 @@ def handle_document(intent, request, target_files, k=None):
                     related_chunks[doc_id], related_docs[doc_id], full_explanation=True
                 )
                 explanations.append(explanation)
-            print("\n\n\n")
-            print("-" * 50)
-            print("final explanation")
-            print("\n\n".join(explanations))
+            logger.debug("Full explanations generated", extra={"count": len(explanations)})
             return "\n\n".join(explanations)
 
         case Intent.DOCUMENT_SECTION_EXPLAIN:
@@ -245,7 +237,7 @@ def handle_document(intent, request, target_files, k=None):
                     query=request.query,
                 )
                 explanations.append(explanation)
-            print("\n\n".join(explanations))
+            logger.debug("Section explanations generated", extra={"count": len(explanations)})
             return "\n\n".join(explanations)
 
         case Intent.COMPARE_DOCUMENTS:
@@ -450,8 +442,13 @@ def handle_uploads(
     user_id: str = "1",
     db_session=None,
 ):
-    print(
-        f"[handle_uploads] has_file={active_ctx.has_file} docs={request.documents} imgs={request.images}"
+    logger.info(
+        "Handling uploads",
+        extra={
+            "has_file": active_ctx.has_file,
+            "docs_count": len(request.documents) if request.documents else 0,
+            "imgs_count": len(request.images) if request.images else 0,
+        },
     )
 
     global AUDIO_TRANSCRIPT
@@ -539,22 +536,16 @@ def handle_uploads(
 
 
 def handle_query(request: UserRequest):
-    print("enter the handler")
+    logger.info("Entering query handler", extra={"query": request.query[:50]})
     from router.classifier import handle_request
 
     intent, ctx = handle_request(request)
-    print("intent done")
-
-    print("intent:", intent)
+    logger.info("Query classified", extra={"intent": intent.value if intent else None})
     handle_uploads(request)
-    print("uploade done")
     from resolve.resolver import resolve
 
     target_files = resolve(request)
-    print("targets: ", target_files)
-    print("resolve done")
-
-    print("docs:", target_files)
+    logger.info("Files resolved", extra={"docs": len(target_files.documents), "images": len(target_files.images)})
 
     match intent:
         case Intent.IMAGE_SEARCH | Intent.IMAGE_UNDERSTANDING:

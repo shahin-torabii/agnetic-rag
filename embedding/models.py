@@ -4,7 +4,10 @@ import os
 import pickle
 from pathlib import Path
 
+from core.logger import get_logger
 from core.types import Data
+
+logger = get_logger(__name__)
 
 
 SERVER_URL = "http://127.0.0.1:8000"
@@ -60,7 +63,7 @@ def save(directory: str):
             "indexed_doc_images": VectorStore.indexed_doc_images,
             "indexed_docs": VectorStore.indexed_docs,
         }, f)
-    print(f"saved to {directory}/")
+    logger.info("Vector store saved", extra={"path": directory})
 
 
 def load(directory: str):
@@ -101,7 +104,7 @@ def load(directory: str):
             Data.chunk_keys.add(key)
             Data.doc_to_chunks.setdefault(chunk.doc_id, []).append(chunk)
 
-    print(f"loaded from {directory}/")
+    logger.info("Vector store loaded", extra={"path": directory})
 
 
 def initialize():

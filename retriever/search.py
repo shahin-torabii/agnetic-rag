@@ -3,8 +3,11 @@ import numpy as np
 import requests
 
 from config.manager import get_config
+from core.logger import get_logger
 from core.types import Data
 from embedding.models import VectorStore, SERVER_URL
+
+logger = get_logger(__name__)
 from embedding.indexer import embed_text
 from retriever.query_expansion import improve_query, is_structural_query, _chunk_to_dict, build_context
 from core.constants import (
@@ -179,12 +182,11 @@ def retrieval_text(query: str, k: int = None,
     reranked_results = rerank(query=query, chunks=primary_results, threshold=-50)
 
     if reranked_results and reranked_results[0]["score"] >= min_threshold:
-        print("✅ High confidence results matched!")
+        logger.info("High confidence results matched")
         return reranked_results
 
-    print("⚠️  Low confidence — activating query expansion fallback...")
     new_query = improve_query(query)
-    print(f"   Expanded query: '{new_query}'")
+    logger.info("Activating query expansion fallback", extra={"expanded_query": new_query})
 
     fallback_candidates = search_text(new_query, k=k, oversample_factor=4, allowed_doc_ids=allowed_doc_ids)
     final_res = rerank(query=new_query, chunks=fallback_candidates,
@@ -231,7 +233,7 @@ def retrieval_chunk_image(query: str, k: int = None,
     reranked, image_scores = search_and_rerank_chunk_images(query, rerank_query=query, allowed_doc_ids = allowed_doc_ids)
 
     if not reranked or reranked[0]["score"] < min_threshold:
-        print("⚠️  Low image confidence — activating query expansion fallback...")
+        logger.info("Low image confidence — activating query expansion fallback")
         expanded_query          = improve_query(query)
         reranked, image_scores  = search_and_rerank_chunk_images(
             expanded_query, rerank_query=expanded_query, allowed_doc_ids = allowed_doc_ids
@@ -257,7 +259,7 @@ def retrieval_chunk_image(query: str, k: int = None,
         result["image_score"] = image_score
         result["final_score"] = round(final_score, 4)
         final_results.append(result)
-    print(final_results)
+    logger.debug("Final blended results", extra={"count": len(final_results)})
     final_results.sort(key=lambda x: x["final_score"], reverse=True)
     return final_results[:k]
 

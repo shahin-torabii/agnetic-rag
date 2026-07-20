@@ -1,7 +1,10 @@
 from pathlib import Path
 import puremagic
 
+from core.logger import get_logger
 from ingest.handlers.digital_pdf_handler import process_pdf
+
+logger = get_logger(__name__)
 from ingest.handlers.non_digital_pdf_handler import process_scanned_pdf
 from ingest.handlers.word_handler import process_docx
 from ingest.handlers.excel_handler import process_excel
@@ -24,11 +27,10 @@ def get_doc_chunks(file_path):
     mime, suffix, path = detect_file_type(file_path)
 
     if mime == "application/pdf":
-        print("digital pdf")
-        #pdf
+        logger.info("Processing digital PDF", extra={"path": str(path)})
         chunks, meta, img_idx, tbl_idx = process_pdf(file_path)
         if chunks == []:
-            print("scanned pdf")
+            logger.info("Falling back to scanned PDF processing", extra={"path": str(path)})
             return process_scanned_pdf(file_path)
 
         return chunks, meta, img_idx, tbl_idx

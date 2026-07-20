@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config.manager import get_config
+from core.logger import get_logger
 from core.schemas import (
     ChatRequest,
     ChatResponse,
@@ -29,6 +30,7 @@ from repositories.user import authenticate_user, create_user, get_user_by_userna
 from services.auth import creat_access_token, get_current_user
 from services.chat import chat
 
+logger = get_logger(__name__)
 config = get_config()
 
 Base.metadata.create_all(bind=engine)
@@ -62,11 +64,10 @@ async def lifespan(app: FastAPI):
     initialize()
     initialize_hf_llm()
     load(config.vector_db_path)
-    print("llm initialized")
-    print(HF_LLM.fast_llm)
+    logger.info("LLM initialized", extra={"model": str(HF_LLM.fast_llm)})
     yield
     save(config.vector_db_path)
-    print("shutting down")
+    logger.info("Shutting down")
 
 
 app = FastAPI(title="agentic-rag chatbot", lifespan=lifespan)
@@ -174,6 +175,5 @@ def list_documents(
 if __name__ == "__main__":
     initialize()
     initialize_hf_llm()
-    print("llm initialized")
-    print(HF_LLM.fast_llm)
+    logger.info("LLM initialized (direct run)")
     uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)

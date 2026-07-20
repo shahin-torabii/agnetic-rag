@@ -4,6 +4,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from llm.prompts import ROUTER_SYSTEM_PROMPT
+from core.logger import get_logger
 from core.constants import (
     EN_ACTION,
     EN_AUDIO_SUMMARIZE,
@@ -34,6 +35,8 @@ from core.types import (
 )
 from embedding.models import VectorStore
 from llm.client import HF_LLM
+
+logger = get_logger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -212,8 +215,8 @@ def build_session_context(session_id: str, user_id: str, db) -> SessionContext:
 
 
 def handle_request(request: UserRequest, user_id: str):
-    print("enter the handle request")
+    logger.info("Classifying request", extra={"query": request.query[:50]})
     intent, ctx = route_query(request)
-    print("finish routing")
+    logger.info("Routing complete", extra={"intent": intent.value if intent else None})
 
     return intent, ctx
