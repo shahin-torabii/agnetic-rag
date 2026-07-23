@@ -2,7 +2,7 @@ import base64
 import time
 from langchain_core.messages import SystemMessage, HumanMessage
 from llm.client import HF_LLM
-from core.constants import MAX_RETRIES, RETRY_WAIT_SECONDS
+from config.manager import get_config
 
 
 def encode_image_to_base64(image_path):
@@ -28,15 +28,16 @@ def send_images_to_vlm(image_paths, query, context=""):
         HumanMessage(content=content),
     ]
 
+    _tuning = get_config().tuning
     last_error = None
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(_tuning.max_retries):
         try:
             response = HF_LLM.vision_llm.invoke(messages)
             return response.content
         except Exception as e:
             last_error = e
-            print(f"VLM call failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
-            time.sleep(RETRY_WAIT_SECONDS)
+            print(f"VLM call failed (attempt {attempt + 1}/{_tuning.max_retries}): {e}")
+            time.sleep(_tuning.retry_wait_seconds)
     raise last_error
 
 

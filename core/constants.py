@@ -1,20 +1,6 @@
 from enum import Enum
 from typing import Dict, List, Literal, Tuple
 
-MAX_RETRIES = 3
-RETRY_WAIT_SECONDS = 5
-TOKENS_PER_BATCH = 3000
-GROUP_SIZE = 5
-
-UPLOAD_DIR = "uploads"
-
-
-BLEND_LOW_WEIGHTS = (0.8, 0.2)
-BLEND_HIGH_WEIGHTS = (0.2, 0.8)
-
-IGNORE_IMAGE_THRESHOLD = 0.1
-HIGH_IMAGE_THRESHOLD = 0.4
-
 REFERENTIAL_PATTERN = r"\b(it|its|that|this|them|those|again|the (first|second|third|last|previous|other) one)\b"
 
 
@@ -248,8 +234,6 @@ BASE_STYLE_PARAMS: Dict[str, Tuple[int, int]] = {
     "Table Caption": (100, 10),
     "Normal": (500, 75),
 }
-
-IMAGE_DIR = "images"
 
 FA_EXPLAIN = [
     "توضیح",

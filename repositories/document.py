@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from core.constants import UPLOAD_DIR
+from config.manager import get_config
 from database.models import SessionDocument, UserDocument
 
 
@@ -73,6 +73,7 @@ def delete_session_documents(db: Session, session_id: str):
 
 
 def save_uploaded_file(user_id: str, filename: str, file) -> str:
+    UPLOAD_DIR = get_config().storage.upload_dir
     user_upload_dir = os.path.join(UPLOAD_DIR, user_id)
     os.makedirs(user_upload_dir, exist_ok=True)
     dest = os.path.join(user_upload_dir, filename)

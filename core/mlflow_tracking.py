@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from typing import Optional
 
 from core.logger import get_logger
+import mlflow
+
 
 logger = get_logger(__name__)
 
@@ -10,7 +12,7 @@ MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
 _EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT", "agentic-rag")
 
 try:
-    import mlflow
+
     _mlflow_available = True
 except ImportError:
     _mlflow_available = False

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
 
 
 @dataclass(frozen=True)
@@ -8,12 +8,6 @@ class PathConfig:
     artifact_dir: str = "artifacts"
     status_file: str = "status.txt"
     metrics_file: str = "metrics.json"
-
-
-@dataclass(frozen=True)
-class HyperparameterConfig:
-    alpha: float = 0.5
-    l1_ratio: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -63,11 +57,36 @@ class DBConfig:
 
 
 @dataclass(frozen=True)
+class TuningConfig:
+    max_retries: int = 3
+    retry_wait_seconds: int = 5
+    tokens_per_batch: int = 3000
+    group_size: int = 5
+
+
+@dataclass(frozen=True)
+class BlendConfig:
+    low_weights: Tuple[float, float] = (0.8, 0.2)
+    high_weights: Tuple[float, float] = (0.2, 0.8)
+    ignore_image_threshold: float = 0.1
+    high_image_threshold: float = 0.4
+
+
+@dataclass(frozen=True)
+class StorageConfig:
+    upload_dir: str = "uploads"
+    image_dir: str = "images"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     db: DBConfig = field(default_factory=DBConfig)
+    tuning: TuningConfig = field(default_factory=TuningConfig)
+    blend: BlendConfig = field(default_factory=BlendConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
     cors_origins: List[str] = field(default_factory=lambda: ["http://localhost:8501"])
     vector_db_path: str = "storage"
     backend_api_url: str = "http://127.0.0.1:8000"

@@ -12,7 +12,7 @@ from analysis.handlers import (
     summarize_chunks,
 )
 from config.manager import get_config
-from core.constants import GROUP_SIZE, MAX_RETRIES, RETRY_WAIT_SECONDS, TOKENS_PER_BATCH
+
 from core.logger import get_logger
 
 logger = get_logger(__name__)

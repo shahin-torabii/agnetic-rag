@@ -1,4 +1,4 @@
-from core.constants import MAX_RETRIES
+from config.manager import get_config
 from core.types import Intent, QueryContext
 from graph.routing import (
     get_rewrite_chain,
@@ -136,7 +136,7 @@ def general_node(state: AgentState) -> AgentState:
 def reflect_node(state: AgentState) -> AgentState:
 
     state.rewritten_query = None
-    if state.retry_count < MAX_RETRIES and (
+    if state.retry_count < get_config().tuning.max_retries and (
         state.error or is_result_weak(state.intent, state.result, state.request.query)
     ):
         state.retry_count += 1

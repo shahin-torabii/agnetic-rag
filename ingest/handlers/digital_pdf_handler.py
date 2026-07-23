@@ -10,10 +10,11 @@ import numpy as np
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config.manager import get_config
-from core.constants import DOC_TYPE_PROFILES, DOC_TYPE_SIGNALS, IMAGE_DIR, DocType
+from config.manager import get_config
+from core.constants import DOC_TYPE_PROFILES, DOC_TYPE_SIGNALS, DocType
 from core.types import BaseMeta, Chunk, _token_count
 
-os.makedirs(IMAGE_DIR, exist_ok=True)
+os.makedirs(get_config().storage.image_dir, exist_ok=True)
 
 OCR_TEXT_RATIO_THRESHOLD = 0.2
 
@@ -296,7 +297,7 @@ def extract_pdf(pdf_path: str) -> Tuple[List, PdfMeta]:
             image_counter += 1
             ext = img_data["ext"]
             image_path = os.path.join(
-                IMAGE_DIR, f"{doc_id}_page{page_num}_img{image_counter}.{ext}"
+                get_config().storage.image_dir, f"{doc_id}_page{page_num}_img{image_counter}.{ext}"
             )
             with open(image_path, "wb") as f:
                 f.write(img_data["image"])

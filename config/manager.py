@@ -12,7 +12,10 @@ from typing import Optional
 
 import yaml
 
-from config.schema import AppConfig, LLMConfig, ChunkingConfig, RetrievalConfig, DBConfig
+from config.schema import (
+    AppConfig, LLMConfig, ChunkingConfig, RetrievalConfig, DBConfig,
+    TuningConfig, BlendConfig, StorageConfig,
+)
 
 
 _CONFIG_DIR = Path(__file__).resolve().parent
@@ -51,6 +54,9 @@ def _build_app_config(raw: dict) -> AppConfig:
     chunking_raw = raw.get("chunking", {})
     retrieval_raw = raw.get("retrieval", {})
     db_raw = raw.get("db", {})
+    tuning_raw = raw.get("tuning", {})
+    blend_raw = raw.get("blend", {})
+    storage_raw = raw.get("storage", {})
 
     return AppConfig(
         llm=LLMConfig(
@@ -77,6 +83,22 @@ def _build_app_config(raw: dict) -> AppConfig:
             top_k=int(_from_env("RETRIEVAL_TOP_K", str(retrieval_raw.get("top_k", 5)))),
             score_threshold=float(_from_env("RETRIEVAL_SCORE_THRESHOLD", str(retrieval_raw.get("score_threshold", 0.05)))),
             alpha=float(_from_env("RETRIEVAL_ALPHA", str(retrieval_raw.get("alpha", 0.5)))),
+        ),
+        tuning=TuningConfig(
+            max_retries=int(_from_env("MAX_RETRIES", str(tuning_raw.get("max_retries", 3)))),
+            retry_wait_seconds=int(_from_env("RETRY_WAIT_SECONDS", str(tuning_raw.get("retry_wait_seconds", 5)))),
+            tokens_per_batch=int(_from_env("TOKENS_PER_BATCH", str(tuning_raw.get("tokens_per_batch", 3000)))),
+            group_size=int(_from_env("GROUP_SIZE", str(tuning_raw.get("group_size", 5)))),
+        ),
+        blend=BlendConfig(
+            low_weights=tuple(blend_raw.get("low_weights", [0.8, 0.2])),
+            high_weights=tuple(blend_raw.get("high_weights", [0.2, 0.8])),
+            ignore_image_threshold=float(blend_raw.get("ignore_image_threshold", 0.1)),
+            high_image_threshold=float(blend_raw.get("high_image_threshold", 0.4)),
+        ),
+        storage=StorageConfig(
+            upload_dir=_from_env("UPLOAD_DIR", storage_raw.get("upload_dir", "uploads")),
+            image_dir=_from_env("IMAGE_DIR", storage_raw.get("image_dir", "images")),
         ),
         db=DBConfig(
             db_url=_from_env("DATABASE_URL", db_raw.get("db_url", "sqlite:///./chatbot.db")),

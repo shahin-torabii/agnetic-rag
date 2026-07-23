@@ -13,11 +13,11 @@ from docx.text.paragraph import Paragraph
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config.manager import get_config
+from config.manager import get_config
 from core.constants import (
     BASE_STYLE_PARAMS,
     DOC_TYPE_PROFILES,
     DOC_TYPE_SIGNALS,
-    IMAGE_DIR,
     DocType,
 )
 from core.types import BaseMeta, Chunk, _token_count
@@ -130,7 +130,7 @@ def pick_chunk_size(doc_type: DocType, chunk_type: str, style: str) -> Tuple[int
             return BASE_STYLE_PARAMS.get(style, (500, 75))
 
 
-os.makedirs(IMAGE_DIR, exist_ok=True)
+os.makedirs(get_config().storage.image_dir, exist_ok=True)
 
 
 HEADING_STYLES: Dict[str, int] = {
@@ -213,7 +213,7 @@ def extract_element(docx_path: str) -> Tuple[list, DocMeta]:
             image_part = rel.target_part
             format = image_part.content_type.split("/")[-1]
 
-            image_path = os.path.join(IMAGE_DIR, f"image_{image_counter}.{format}")
+            image_path = os.path.join(get_config().storage.image_dir, f"image_{image_counter}.{format}")
             with open(image_path, "wb") as f:
                 f.write(image_part.blob)
 

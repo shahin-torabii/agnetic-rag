@@ -58,10 +58,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from PIL import Image, ImageOps
 
 from config.manager import get_config
-from core.constants import DOC_TYPE_PROFILES, DOC_TYPE_SIGNALS, IMAGE_DIR, DocType
+from core.constants import DOC_TYPE_PROFILES, DOC_TYPE_SIGNALS, DocType
 from core.types import Chunk, _token_count
 
-os.makedirs(IMAGE_DIR, exist_ok=True)
+os.makedirs(get_config().storage.image_dir, exist_ok=True)
 
 
 MIN_CHARS_FOR_TEXT = 20
@@ -439,7 +439,7 @@ def extract_pages(pdf_path: str) -> Tuple[List, PdfMeta]:
     section_stack: list = []
     counter: list = [0]
     image_counter: int = 0
-    doc_image_dir = os.path.join(IMAGE_DIR, f"scan_{doc_id}")
+    doc_image_dir = os.path.join(get_config().storage.image_dir, f"scan_{doc_id}")
 
     try:
         with pdfplumber.open(pdf_path) as pdf_pl:

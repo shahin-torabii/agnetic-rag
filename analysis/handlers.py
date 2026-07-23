@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import List
 
 from config.manager import get_config
-from core.constants import GROUP_SIZE, MAX_RETRIES, RETRY_WAIT_SECONDS, TOKENS_PER_BATCH
+from config.manager import get_config
 from core.types import BaseMeta, Chunk, Data
 from llm.client import HF_LLM
 from llm.prompts import (
@@ -37,14 +37,15 @@ def call_llm(
     chain = prompt | llm.bind(max_tokens=max_tokens) | StrOutputParser()
     invoke_vars = {**system_vars, "input": user_text}
 
+    _tuning = get_config().tuning
     last_error = None
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(_tuning.max_retries):
         try:
             return chain.invoke(invoke_vars)
         except Exception as e:
             last_error = e
-            print(f"LLM call failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
-            time.sleep(RETRY_WAIT_SECONDS)
+            print(f"LLM call failed (attempt {attempt + 1}/{_tuning.max_retries}): {e}")
+            time.sleep(_tuning.retry_wait_seconds)
     raise last_error
 
 
@@ -71,7 +72,9 @@ def select_related_chunks(chunks, query=None):
     return retrieval(query, k=get_config().retrieval.text_k, is_doc=True)
 
 
-def make_batches(chunks, max_tokens=TOKENS_PER_BATCH):
+def make_batches(chunks, max_tokens=None):
+    if max_tokens is None:
+        max_tokens = get_config().tuning.tokens_per_batch
     batches, current_batch, current_tokens = [], [], 0
     for chunk in chunks:
         tokens = chunk.token_count or 0
@@ -96,7 +99,9 @@ def batch_to_text(batch):
     return "\n".join(parts)
 
 
-def merge_in_groups(items, merge_fn, group_size=GROUP_SIZE):
+def merge_in_groups(items, merge_fn, group_size=None):
+    if group_size is None:
+        group_size = get_config().tuning.group_size
     while len(items) > group_size:
         merged = []
         for i in range(0, len(items), group_size):
@@ -164,7 +169,9 @@ def overview_final(partial_overviews, meta=None):
     )
 
 
-def overview_func(chunks, meta=None, batch_size_tokens=TOKENS_PER_BATCH):
+def overview_func(chunks, meta=None, batch_size_tokens=None):
+    if batch_size_tokens is None:
+        batch_size_tokens = get_config().tuning.tokens_per_batch
     batches = make_batches(chunks, max_tokens=batch_size_tokens)
     partials = [overview_partial(b) for b in batches]
     if len(partials) == 1:
@@ -205,7 +212,7 @@ def explain_doc(
     meta=None,
     full_explanation=False,
     query=None,
-    batch_size_tokens=TOKENS_PER_BATCH,
+        batch_size_tokens=get_config().tuning.tokens_per_batch,
 ):
     selected = (
         sorted(chunks, key=lambda x: (x.doc_id, x.chunk_index))

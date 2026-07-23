@@ -14,7 +14,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Emu, Pt
 
 from config.manager import get_config
-from core.constants import DOC_TYPE_SIGNALS, IMAGE_DIR, DocType
+from core.constants import DOC_TYPE_SIGNALS, DocType
 from core.types import Chunk, _token_count
 
 SECTION_HEADER_LAYOUTS = {
@@ -230,7 +230,7 @@ def extract_slides(pptx_path: str) -> Tuple[List[SlideData], PPTX_META]:
                     image_ext = shape.image.ext
 
                     file_name = f"{doc_id}_slide{slide_number}_image {image_counter}.{image_ext}"
-                    image_path = os.path.join(IMAGE_DIR, file_name)
+                    image_path = os.path.join(get_config().storage.image_dir, file_name)
 
                     with open(image_path, "wb") as f:
                         f.write(image_bytes)

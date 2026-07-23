@@ -5,7 +5,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from config.manager import get_config
-from core.constants import MAX_RETRIES
+
 from core.types import Intent
 from graph.state import AgentState
 from llm.client import HF_LLM

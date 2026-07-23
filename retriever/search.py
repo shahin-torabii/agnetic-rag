@@ -11,10 +11,7 @@ from embedding.models import VectorStore, SERVER_URL
 logger = get_logger(__name__)
 from embedding.indexer import embed_text
 from retriever.query_expansion import improve_query, is_structural_query, _chunk_to_dict, build_context
-from core.constants import (
-    BLEND_LOW_WEIGHTS, BLEND_HIGH_WEIGHTS,
-    IGNORE_IMAGE_THRESHOLD, HIGH_IMAGE_THRESHOLD
-)
+
 
 _cfg = get_config().retrieval
 
@@ -244,7 +241,8 @@ def retrieval_chunk_image(query: str, k: int = None,
         )
 
     structural = is_structural_query(query)
-    rw, iw_low, iw_high = 1.0, BLEND_LOW_WEIGHTS, BLEND_HIGH_WEIGHTS
+    cfg_blend = get_config().blend
+    rw, iw_low, iw_high = 1.0, cfg_blend.low_weights, cfg_blend.high_weights
 
     final_results = []
     for r in reranked:
@@ -252,9 +250,9 @@ def retrieval_chunk_image(query: str, k: int = None,
         image_score  = image_scores.get(key, 0.0)
         rerank_score = r["score"]
 
-        if structural or image_score < IGNORE_IMAGE_THRESHOLD:
+        if structural or image_score < cfg_blend.ignore_image_threshold:
             final_score = rerank_score
-        elif image_score < HIGH_IMAGE_THRESHOLD:
+        elif image_score < cfg_blend.high_image_threshold:
             final_score = iw_low[0] * rerank_score + iw_low[1] * image_score
         else:
             final_score = iw_high[0] * rerank_score + iw_high[1] * image_score

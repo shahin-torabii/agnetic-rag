@@ -1,5 +1,3 @@
-# Base configuration for the RAG Chatbot
-
 llm:
   strong_model: "Qwen/Qwen3-8B"
   fast_model: "Qwen/Qwen3-4B"
@@ -23,6 +21,22 @@ retrieval:
   top_k: 5
   score_threshold: 0.05
   alpha: 0.5
+
+tuning:
+  max_retries: 3
+  retry_wait_seconds: 5
+  tokens_per_batch: 3000
+  group_size: 5
+
+blend:
+  low_weights: [0.8, 0.2]
+  high_weights: [0.2, 0.8]
+  ignore_image_threshold: 0.1
+  high_image_threshold: 0.4
+
+storage:
+  upload_dir: "uploads"
+  image_dir: "images"
 
 db:
   db_url: "sqlite:///./chatbot.db"
